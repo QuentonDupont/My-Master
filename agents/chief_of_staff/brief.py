@@ -14,6 +14,7 @@ import datetime as dt
 import json
 from pathlib import Path
 
+from agents.chief_of_staff import boards as boards_mod
 from agents.chief_of_staff import rules as rules_mod
 from core import config, corrections, ledger as ledger_mod, log, proposals
 
@@ -130,7 +131,20 @@ def brief() -> dict:
         "rule_proposals": rules_mod.cluster(),
         "cost_7d": cost(7),
         "errors": errors(7),
+        "boards": _board_section(),
     }
+
+
+def _board_section() -> dict:
+    """Tracked boards, ranked. Never lets a board outage break the brief."""
+    try:
+        rows = boards_mod.collect()
+    except Exception as exc:  # pragma: no cover - network path
+        LOG.warn("brief.boards_unavailable", error=str(exc)[:200])
+        return {"error": str(exc)[:200]}
+    return {"summary": boards_mod.summarise(rows),
+            "top": rows[:8],
+            "changes": boards_mod.changes(rows)}
 
 
 def render(data: dict) -> str:
@@ -178,6 +192,28 @@ def render(data: dict) -> str:
         out.append(f"- ⚠ {cost_data['analyst_fallbacks']} analyst calls fell back to "
                    f"the heuristic")
     out.append("")
+
+    board = data.get("boards") or {}
+    if board.get("summary"):
+        stats = board["summary"]
+        counts = " · ".join(f"{n} {p}" for p, n in stats["by_priority"].items())
+        out += ["## Boards", "", f"{stats['total']} open — {counts}."]
+        change = board.get("changes") or {}
+        if change.get("baseline"):
+            bits = []
+            if change.get("new"):
+                bits.append(f"{len(change['new'])} new")
+            if change.get("closed"):
+                bits.append(f"{len(change['closed'])} closed")
+            if change.get("raised"):
+                bits.append(f"{len(change['raised'])} raised in priority")
+            if bits:
+                out.append(f"Since {change['baseline']}: " + ", ".join(bits) + ".")
+        out.append("")
+        for row in board.get("top", []):
+            out.append(f"- **{row['priority']}** {row['key']} ({row['age_days']}d, "
+                       f"{row['assignee']}) — {row['summary'][:64]}")
+        out.append("")
 
     errs = data["errors"]
     if errs["tickets_with_last_error"] or errs["log_errors"]:

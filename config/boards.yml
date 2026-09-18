@@ -68,3 +68,15 @@ development:
 allowed_projects:
   - PESD1
   - PRDT
+
+# Boards the Chief of Staff tracks and ranks by priority. Every board here must
+# belong to a project in allowed_projects — the client checks each issue it
+# returns, so a board whose filter reaches wider raises rather than widening
+# scope silently.
+tracked_boards:
+  - id: 381
+    name: PESD1 board
+    project: PESD1
+  - id: 347
+    name: Tech Ops
+    project: PRDT

@@ -42,3 +42,5 @@ development:
 allowed_projects:
   - PESD1
   - PRDT
+
+tracked_boards: []

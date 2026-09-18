@@ -221,6 +221,35 @@ class JiraReadClient(_Base):
                                             "description", "reporter")}
         return {}
 
+    def board_issues(self, board_id: int | str, jql: str = "",
+                     fields: list[str] | None = None,
+                     limit: int | None = None) -> list[dict]:
+        """Issues on an agile board, honouring the board's own filter.
+
+        Every returned key is checked: a board whose filter reaches outside the
+        allowed projects raises rather than quietly widening scope.
+        """
+        out: list[dict] = []
+        start = 0
+        while True:
+            params = {"startAt": start, "maxResults": 100,
+                      "fields": ",".join(fields or DEFAULT_SEARCH_FIELDS)}
+            if jql:
+                params["jql"] = jql
+            page = self._request("GET", f"/rest/agile/1.0/board/{board_id}/issue",
+                                 params=params)
+            batch = page.get("issues", [])
+            for issue in batch:
+                assert_key_allowed(issue["key"])
+            out.extend(batch)
+            start += len(batch)
+            if not batch or start >= page.get("total", 0):
+                break
+            if limit and len(out) >= limit:
+                break
+        LOG.info("jira.board_issues", board=board_id, returned=len(out))
+        return out[:limit] if limit else out
+
     def creatable_fields(self, project: str, issue_type: str) -> set[str]:
         """Field ids the create screen for this issue type actually accepts."""
         assert_project_allowed(project)

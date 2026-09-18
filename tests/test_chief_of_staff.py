@@ -61,3 +61,51 @@ class BriefTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BoardTrackingTests(unittest.TestCase):
+    def test_ranking_is_priority_first_then_oldest(self):
+        from agents.chief_of_staff import boards
+        rows = [
+            {"key": "A-1", "priority": "Medium", "age_days": 200},
+            {"key": "A-2", "priority": "Critical", "age_days": 2},
+            {"key": "A-3", "priority": "Critical", "age_days": 90},
+            {"key": "A-4", "priority": "Low", "age_days": 400},
+            {"key": "A-5", "priority": "High", "age_days": 1},
+        ]
+        rows.sort(key=lambda r: (boards.priority_rank(r["priority"]),
+                                 -r["age_days"], r["key"]))
+        self.assertEqual([r["key"] for r in rows],
+                         ["A-3", "A-2", "A-5", "A-1", "A-4"])
+
+    def test_unprioritised_sorts_last_not_first(self):
+        from agents.chief_of_staff import boards
+        self.assertGreater(boards.priority_rank(None), boards.priority_rank("Low"))
+        self.assertGreater(boards.priority_rank("Unprioritised"),
+                           boards.priority_rank("Low"))
+
+    def test_open_jql_excludes_the_configured_terminal_statuses(self):
+        from agents.chief_of_staff import boards
+        from core import config
+        with sandbox():
+            jql = boards._open_jql(config.intake_project())
+            for status in config.boards()["intake"]["resolved_statuses"]:
+                self.assertIn(f'"{status}"', jql)
+            self.assertIn("resolution is EMPTY", jql)
+
+    def test_changes_reports_new_closed_and_raised(self):
+        from agents.chief_of_staff import boards
+        with sandbox():
+            boards.snapshot([{"key": "A-1", "priority": "Medium"},
+                             {"key": "A-2", "priority": "High"}])
+            result = boards.changes([{"key": "A-1", "priority": "Critical"},
+                                     {"key": "A-3", "priority": "Low"}])
+            self.assertEqual(result["new"], ["A-3"])
+            self.assertEqual(result["closed"], ["A-2"])
+            self.assertEqual(result["raised"],
+                             [{"key": "A-1", "from": "Medium", "to": "Critical"}])
+
+    def test_a_board_outside_the_allowlist_is_refused(self):
+        from core.jira_client import ScopeError, assert_key_allowed
+        with self.assertRaises(ScopeError):
+            assert_key_allowed("BUSK-1")

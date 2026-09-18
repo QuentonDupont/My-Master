@@ -186,6 +186,17 @@
   .rec .actions { margin-top: 11px; }
   .rec[data-state="done"] { opacity: 0.6; border-left-color: var(--ok); }
   .landed { font-family: var(--mono); font-size: 11px; color: var(--ok); }
+  .prow {
+    display: flex; gap: 10px; align-items: baseline; padding: 10px 12px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 3px solid var(--pstripe, var(--line-strong)); border-radius: 8px;
+  }
+  .prow .pkey { font-family: var(--mono); font-size: 11.5px; font-weight: 600;
+                flex: 0 0 auto; }
+  .prow .psum { flex: 1; min-width: 0; font-size: 13.5px; }
+  .prow .page { font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+                flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  .prow .pwho { font-size: 11.5px; color: var(--ink-muted); }
 
   .section-label {
     margin: 24px 0 2px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
@@ -208,12 +219,18 @@
       <button class="chip" data-filter="decided" aria-pressed="false">Decided</button>
       <button class="chip" data-filter="info" aria-pressed="false">Escalations</button>
       <button class="chip" data-filter="all" aria-pressed="false">Everything</button>
+      <button class="chip" data-filter="boards" aria-pressed="false">Board priorities</button>
     </div>
   </header>
 
   <section id="recs-section" hidden>
     <div class="section-label">Close as Won't Do — your call, in Jira</div>
     <div class="recs" id="recs"></div>
+  </section>
+
+  <section id="boards-section" hidden>
+    <div class="section-label" id="boards-label"></div>
+    <div class="recs" id="boards"></div>
   </section>
 
   <div class="list" id="list"></div>
@@ -242,6 +259,11 @@
   let db = null;
   let docs = [];
   let recs = [];
+  let boardItems = [];
+  const PRIORITY_STRIPE = {
+    Critical: "var(--stop)", High: "var(--accent)",
+    Medium: "var(--warn)", Low: "var(--line-strong)",
+  };
   let filter = "pending";
   const open = new Set();
   const busy = new Set();
@@ -294,8 +316,30 @@
     });
   }
 
+  function renderBoards() {
+    const section = document.getElementById("boards-section");
+    const host = document.getElementById("boards");
+    const label = document.getElementById("boards-label");
+    section.hidden = filter !== "boards";
+    if (section.hidden) return;
+    const counts = {};
+    boardItems.forEach((b) => { counts[b.priority] = (counts[b.priority] || 0) + 1; });
+    label.textContent = boardItems.length
+      ? `${boardItems.length} open, highest priority and longest waiting first`
+      : "No board data yet";
+    host.innerHTML = boardItems.map((b) => `
+      <div class="prow" style="--pstripe:${PRIORITY_STRIPE[b.priority] || "var(--line-strong)"}">
+        <span class="pkey"><a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.key)}</a></span>
+        <span class="psum">${esc(b.summary)}
+          <div class="pwho">${esc(b.priority)} · ${esc(b.assignee)} · ${esc(b.board)}</div>
+        </span>
+        <span class="page">${esc(String(b.age_days))}d</span>
+      </div>`).join("");
+  }
+
   function render() {
     renderRecs();
+    renderBoards();
     const buckets = { pending: 0, decided: 0, info: 0 };
     docs.forEach((p) => { buckets[bucket(p)] += 1; });
     countsEl.innerHTML =
@@ -306,13 +350,13 @@
         ? `<span><b>${recs.filter((r) => r.state === "open").length}</b> to close</span>`
         : "");
 
-    const shown = docs
+    const shown = filter === "boards" ? [] : docs
       .filter((p) => filter === "all" || bucket(p) === filter)
       .sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
 
     listEl.innerHTML = shown.map(card).join("");
-    emptyEl.hidden = shown.length > 0;
-    if (!shown.length) {
+    emptyEl.hidden = shown.length > 0 || filter === "boards";
+    if (!shown.length && filter !== "boards") {
       emptyEl.textContent = filter === "pending"
         ? "Nothing waiting on you. New proposals appear here after the next triage run."
         : "Nothing here yet.";
@@ -519,6 +563,20 @@
       emptyEl.textContent = "This view cannot reach the proposal store. Open the page from your own Claude account.";
       return;
     }
+    db.collection("board_items").onSnapshot(
+      (snap) => {
+        boardItems = snap.docs.map((d) => {
+          const v = d.data() || {};
+          return {
+            key: v.key || d.id, url: v.url || "#", summary: v.summary || "",
+            priority: v.priority || "Unprioritised", assignee: v.assignee || "—",
+            board: v.board || "", age_days: v.age_days || 0, rank: v.rank || 999,
+          };
+        }).sort((a, b) => a.rank - b.rank);
+        render();
+      },
+      () => {},
+    );
     db.collection("recommendations").onSnapshot(
       (snap) => {
         recs = snap.docs.map((d) => {
