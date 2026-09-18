@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sqlite3
 from pathlib import Path
@@ -42,7 +43,8 @@ CREATE TABLE IF NOT EXISTS documents (
   components   TEXT,               -- json list
   title        TEXT NOT NULL,
   body         TEXT NOT NULL,
-  url          TEXT
+  url          TEXT,
+  links        TEXT               -- json: [{key, project, status, type}]
 );
 CREATE INDEX IF NOT EXISTS documents_type_idx ON documents(source_type);
 CREATE INDEX IF NOT EXISTS documents_status_idx ON documents(status);
@@ -50,6 +52,14 @@ CREATE INDEX IF NOT EXISTS documents_ref_idx ON documents(ref);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
   title, body, doc_id UNINDEXED, tokenize='porter unicode61'
+);
+
+-- How many documents each term appears in. Rare words ("racha", "happitat")
+-- carry the meaning; common ones ("add", "new", "please") do not, and counting
+-- every shared term equally made two tickets about the same shop look unrelated.
+CREATE TABLE IF NOT EXISTS term_df (
+  term TEXT PRIMARY KEY,
+  df   INTEGER NOT NULL
 );
 """
 
@@ -107,13 +117,14 @@ class Corpus:
         self.conn.execute(
             """INSERT INTO documents (doc_id, source_type, ref, project, status,
                  resolution, created, updated, reporter, assignee, labels, components,
-                 title, body, url)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 title, body, url, links)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (doc_id, doc["source_type"], doc["ref"], doc.get("project"),
              doc.get("status"), doc.get("resolution"), doc.get("created"),
              doc.get("updated"), doc.get("reporter"), doc.get("assignee"),
              json.dumps(doc.get("labels") or []), json.dumps(doc.get("components") or []),
-             doc.get("title") or "", doc.get("body") or "", doc.get("url")),
+             doc.get("title") or "", doc.get("body") or "", doc.get("url"),
+             json.dumps(doc.get("links") or [])),
         )
         self.conn.execute(
             "INSERT INTO docs_fts (title, body, doc_id) VALUES (?,?,?)",
@@ -174,17 +185,38 @@ class Corpus:
         rows = self.conn.execute(" ".join(sql), params).fetchall()
 
         query_terms = set(keywords(text, 18))
+        # Absolute similarity — the share of the query's INFORMATION a document
+        # carries, weighting each term by how rare it is in the corpus. Never
+        # normalise against the best hit in the result set: with one weak hit
+        # that would score it 1.0.
+        weights = {t: self.idf(t) for t in query_terms}
+        total_weight = sum(weights.values()) or 1.0
         scored = []
         for row in rows:
             doc = _row_to_doc(row)
             raw = -float(row["bm25"])  # bm25(): lower is better
             doc["score"] = round(raw * SOURCE_WEIGHT.get(doc["source_type"], 1.0), 4)
-            # Similarity is ABSOLUTE — the share of the query's signal terms this
-            # document actually contains. Never normalise against the best hit in
-            # the result set: with one weak hit that would score it 1.0.
             doc_terms = set(keywords(f"{doc['title']} {doc['body']}", 400))
-            doc["similarity"] = (round(len(query_terms & doc_terms) / len(query_terms), 3)
-                                 if query_terms else 0.0)
+            shared = query_terms & doc_terms
+            shared_weight = sum(weights[t] for t in shared)
+            # Coverage runs both ways. One direction alone misses the duplicate
+            # that matters most: a short existing ticket whose whole content sits
+            # inside a longer new one ("Create New Location - Central Si Racha"
+            # inside "Add two new locations ... Si Racha and Happitat").
+            cov_query = shared_weight / total_weight if query_terms else 0.0
+            # The other direction measures the document's SUBJECT, which is its
+            # title. Measuring it against title + every comment would let a long
+            # discussion bury the fact that the request is the same one.
+            subject = set(keywords(doc["title"], 60)) or doc_terms
+            subject_shared = query_terms & subject
+            subject_weight = sum(self.idf(t) for t in subject) or 1.0
+            cov_doc = sum(self.idf(t) for t in subject_shared) / subject_weight
+            # A two-word document would otherwise match everything it mentions.
+            if len(subject_shared) < 2 and not any(self.is_rare_term(t)
+                                                   for t in subject_shared):
+                cov_doc = 0.0
+            doc["similarity"] = round(max(cov_query, cov_doc), 3)
+            doc["shared_terms"] = sorted(shared, key=lambda t: -weights[t])[:6]
             scored.append(doc)
         scored.sort(key=lambda d: (-d["similarity"], -d["score"]))
         return scored[:limit]
@@ -197,10 +229,62 @@ class Corpus:
         return out
 
 
+    # -- term statistics ---------------------------------------------------
+    def rebuild_term_stats(self) -> int:
+        """Recount document frequencies. Call after adding documents."""
+        counts: dict[str, int] = {}
+        rows = self.conn.execute("SELECT title, body FROM documents")
+        total = 0
+        for row in rows:
+            total += 1
+            for term in set(keywords(f"{row['title']} {row['body']}", 400)):
+                counts[term] = counts.get(term, 0) + 1
+        self.conn.execute("BEGIN")
+        self.conn.execute("DELETE FROM term_df")
+        self.conn.executemany("INSERT INTO term_df (term, df) VALUES (?, ?)",
+                              counts.items())
+        self.conn.execute("COMMIT")
+        self._df_cache = None
+        LOG.info("corpus.term_stats", documents=total, terms=len(counts))
+        return total
+
+    def _df(self) -> tuple[dict[str, int], int]:
+        cached = getattr(self, "_df_cache", None)
+        if cached is None:
+            rows = self.conn.execute("SELECT term, df FROM term_df")
+            df = {r["term"]: r["df"] for r in rows}
+            total = self.conn.execute("SELECT COUNT(*) c FROM documents").fetchone()["c"]
+            if not df and total:
+                # Documents were added without rebuilding the statistics. Left
+                # alone, every term would weigh the same and similarity would
+                # quietly fall back to counting words.
+                LOG.warn("corpus.term_stats_missing", documents=total)
+                self.rebuild_term_stats()
+                rows = self.conn.execute("SELECT term, df FROM term_df")
+                df = {r["term"]: r["df"] for r in rows}
+            cached = (df, max(total, 1))
+            self._df_cache = cached
+        return cached
+
+    def idf(self, term: str) -> float:
+        df, total = self._df()
+        return math.log(1 + total / (1 + df.get(term, 0)))
+
+    def is_rare_term(self, term: str) -> bool:
+        """A term specific enough to identify a thing — a shop, a system, an id.
+
+        Defined against the corpus rather than as a fixed score, so it means the
+        same on 900 documents as on 90.
+        """
+        df, total = self._df()
+        return df.get(term, 0) <= max(2, int(total * 0.005))
+
+
 def _row_to_doc(row: sqlite3.Row) -> dict:
     doc = dict(row)
     doc["labels"] = json.loads(doc.get("labels") or "[]")
     doc["components"] = json.loads(doc.get("components") or "[]")
+    doc["links"] = json.loads(doc.get("links") or "[]")
     return doc
 
 
@@ -227,6 +311,16 @@ def doc_from_jira(issue: dict) -> dict:
         "title": f.get("summary") or "",
         "body": "\n\n".join(p for p in body_parts if p),
         "url": config.ticket_url(issue["key"]),
+        "links": [
+            {
+                "key": (l.get("inwardIssue") or l.get("outwardIssue") or {}).get("key"),
+                "type": (l.get("type") or {}).get("name"),
+                "status": (((l.get("inwardIssue") or l.get("outwardIssue") or {})
+                            .get("fields") or {}).get("status") or {}).get("name"),
+            }
+            for l in (f.get("issuelinks") or [])
+            if (l.get("inwardIssue") or l.get("outwardIssue"))
+        ],
     }
 
 
@@ -262,6 +356,7 @@ def build(clear: bool = True) -> dict:
         if clear:
             corpus.clear()
         n = corpus.add_many(docs)
+        corpus.rebuild_term_stats()
         stats = corpus.stats()
     LOG.info("corpus.built", documents=n, **stats)
     return stats

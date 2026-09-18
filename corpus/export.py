@@ -23,7 +23,7 @@ RAW = config.CORPUS_DIR / "raw"
 
 JIRA_FIELDS = ["summary", "description", "status", "resolution", "created", "updated",
                "reporter", "assignee", "labels", "components", "priority", "issuetype",
-               "comment"]
+               "comment", "issuelinks"]
 
 
 def export_jira(project: str, months: int = 18, limit: int | None = None) -> int:

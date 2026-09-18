@@ -26,6 +26,15 @@ DUPLICATE_THRESHOLD = 0.62
 #: below this, a hit is noise — citing it would make the proposal look researched
 #: when it is not.
 MIN_RELEVANCE = 0.25
+#: Two tickets sharing a rare proper noun — a shop name, a system, an order id —
+#: are probably about the same thing even when little else matches: "Add two new
+#: locations ... Central Si Racha and Happitat" against "Request to Create New
+#: Location - Central Si Racha" share 43% of terms and are the same request.
+#: Rarity is Corpus.is_rare_term, which scales with the corpus.
+#: Without a rare term in common, related work needs real textual overlap —
+#: below this, "Please update X" matches "Please update Y" and the flag stops
+#: meaning anything.
+RELATED_COVERAGE = 0.45
 #: closed/resolved-ish statuses. Anything not here counts as open.
 RESOLVED_HINTS = ("done", "closed", "resolved", "complete", "cancelled", "declined")
 #: PRDT summaries start with a component tag: "[HEN] ...", "[NET] ...".
@@ -36,6 +45,7 @@ TAG_RE = re.compile(r"^\s*[\[(]([^\])]{2,20})[\])]")
 class Retrieval:
     """Everything the Historian found for one ticket."""
     duplicates: list[dict] = field(default_factory=list)
+    related: list[dict] = field(default_factory=list)
     similar_resolved: list[dict] = field(default_factory=list)
     sops: list[dict] = field(default_factory=list)
     github: list[dict] = field(default_factory=list)
@@ -44,6 +54,15 @@ class Retrieval:
     def evidence(self, limit: int = 8) -> list[dict]:
         """Shaped for `Proposal.evidence` — every item says why it is here."""
         out: list[dict] = []
+        for doc in self.related:
+            clones = ", ".join(f"{c['key']} ({c['status']})"
+                               for c in doc.get("open_clones", []))
+            shared = ", ".join(doc.get("shared_terms", [])[:3])
+            out.append({
+                "type": "jira", "ref": doc["ref"],
+                "why": (f"open ticket about the same thing — shares {shared}"
+                        + (f", already cloned to {clones}" if clones else "")
+                        + f" ({doc['similarity']:.0%} overlap)")})
         for doc in self.sops:
             out.append({"type": "sop", "ref": doc["ref"],
                         "why": f"approved SOP, {doc['similarity']:.0%} match on the symptom"})
@@ -103,6 +122,38 @@ class Historian:
         )
         return [h for h in hits if h.get("similarity", 0) >= threshold][:limit]
 
+    def related_open_work(self, text: str, *, exclude_ref: str | None = None,
+                          limit: int = 4) -> list[dict]:
+        """Open tickets that look like the same request without being a textual
+        match — the case a coverage threshold alone will always miss.
+
+        Never auto-classified as a duplicate: it is put in front of the human,
+        with whatever dev work those tickets already have.
+        """
+        open_statuses = tuple(config.boards()["intake"]["open_statuses"])
+        hits = self.corpus.search(
+            text, limit=limit * 4, source_types=("jira",),
+            project=config.intake_project(), statuses=open_statuses,
+            exclude_refs=(exclude_ref,) if exclude_ref else (),
+        )
+        dev_terminal = {s.lower() for s in
+                        (config.boards()["development"].get("resolved_statuses") or [])}
+        out = []
+        for doc in hits:
+            rare = [t for t in doc.get("shared_terms", [])
+                    if self.corpus.is_rare_term(t)]
+            if not rare and doc.get("similarity", 0) < RELATED_COVERAGE:
+                continue
+            doc["rare_terms"] = rare
+            doc["open_clones"] = [
+                l for l in (doc.get("links") or [])
+                if l.get("key") and (l.get("status") or "").lower() not in dev_terminal
+            ]
+            out.append(doc)
+        # Tickets with live dev work first — that is the expensive mistake.
+        out.sort(key=lambda d: (not d["open_clones"], -d.get("similarity", 0)))
+        return out[:limit]
+
     def similar_resolved(self, text: str, *, exclude_ref: str | None = None,
                          limit: int = 5) -> list[dict]:
         hits = self.corpus.search(text, limit=limit * 4, source_types=("jira",),
@@ -136,14 +187,16 @@ class Historian:
     def research(self, ticket_key: str, summary: str, description: str) -> Retrieval:
         text = f"{summary}\n\n{description}"
         dupes = self.duplicates(text, exclude_ref=ticket_key)
+        related = [] if dupes else self.related_open_work(text, exclude_ref=ticket_key)
         similar = self.similar_resolved(text, exclude_ref=ticket_key)
         sops = self.sops(text)
         gh = self.github_for([d["ref"] for d in similar])
         comps = self.components_for(text)
         LOG.info("historian.research", ticket=ticket_key, duplicates=len(dupes),
-                 similar=len(similar), sops=len(sops), github=len(gh), components=comps)
-        return Retrieval(duplicates=dupes, similar_resolved=similar, sops=sops,
-                         github=gh, components=comps)
+                 related=len(related), similar=len(similar), sops=len(sops),
+                 github=len(gh), components=comps)
+        return Retrieval(duplicates=dupes, related=related, similar_resolved=similar,
+                         sops=sops, github=gh, components=comps)
 
     # -- assignee ranking --------------------------------------------------
     def assignee_candidates(self, text: str, *, labels: list[str] | None = None,

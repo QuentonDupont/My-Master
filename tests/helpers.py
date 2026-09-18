@@ -81,3 +81,4 @@ def build_corpus() -> None:
     docs += [doc_from_markdown(p) for p in sorted(sop_dir.glob("*.md"))]
     with Corpus() as corpus:
         corpus.add_many(docs)
+        corpus.rebuild_term_stats()

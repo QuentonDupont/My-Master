@@ -25,6 +25,46 @@ class HistorianTests(unittest.TestCase):
                                         exclude_ref="PESD1-11279")
             self.assertEqual(dupes, [])
 
+    def test_a_shared_rare_term_surfaces_related_open_work(self):
+        """The real miss: PESD1-11271 asked for two shops that already had their
+        own open tickets. Word overlap was 0.43 — under any sane duplicate
+        threshold — but they shared a rare proper noun and had live dev work."""
+        from corpus.index import Corpus
+        with sandbox():
+            build_corpus()
+            with Corpus() as corpus:
+                corpus.add_many([
+                    {"doc_id": "jira:PESD1-9001", "source_type": "jira",
+                     "ref": "PESD1-9001", "project": "PESD1",
+                     "status": "Waiting for Support",
+                     "title": "Request to Create New Location - Central Si Racha",
+                     "body": "", "links": [{"key": "PRDT-9500", "type": "Cloners",
+                                            "status": "To Do"}]},
+                ])
+                corpus.rebuild_term_stats()
+            with Historian() as hist:
+                related = hist.related_open_work(
+                    'Add two new locations in NS - "TH Central Si Racha" and "TH Happitat"',
+                    exclude_ref="PESD1-11274")
+            refs = [d["ref"] for d in related]
+            self.assertIn("PESD1-9001", refs)
+            hit = next(d for d in related if d["ref"] == "PESD1-9001")
+            self.assertIn("racha", hit["rare_terms"])
+            self.assertEqual(hit["open_clones"][0]["key"], "PRDT-9500")
+            self.assertLess(hit["similarity"], 0.62,
+                            "this is exactly the case a coverage threshold misses")
+
+    def test_rarity_scales_with_the_corpus(self):
+        from corpus.index import Corpus
+        with sandbox():
+            build_corpus()
+            with Corpus() as corpus:
+                self.assertTrue(corpus.is_rare_term("racha"),
+                                "a term in no document is rare")
+                self.assertFalse(corpus.is_rare_term("stock"),
+                                 "a term in most of the fixtures is not rare")
+                self.assertGreater(corpus.idf("racha"), corpus.idf("stock"))
+
     def test_similar_resolved_are_actually_resolved(self):
         with sandbox():
             build_corpus()

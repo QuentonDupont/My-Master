@@ -144,6 +144,19 @@ def process(issue: dict, *, ledger: ledger_mod.Ledger | None = None,
 
         evidence = [proposals.Evidence(**e) for e in research.evidence()]
         flags = list(dict.fromkeys(list(analysis.flags) + list(requester.flags)))
+        if research.related:
+            flags.append("possible_duplicate")
+            with_clones = [d for d in research.related if d.get("open_clones")]
+            if with_clones:
+                flags.append("open_dev_work_exists")
+                # Someone is already building this. Do not let a confident-looking
+                # clone proposal hide that.
+                analysis.confidence = round(min(analysis.confidence, 0.4), 2)
+                LOG.warn("worker.open_dev_work", ticket=key,
+                         related=[d["ref"] for d in with_clones],
+                         clones=[c["key"] for d in with_clones
+                                 for c in d["open_clones"]])
+
         unreadable = unreadable_detail(issue)
         if unreadable:
             flags.append("detail_in_attachment")
