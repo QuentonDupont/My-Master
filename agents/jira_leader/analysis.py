@@ -92,22 +92,31 @@ class Analysis:
     analyst: str = "heuristic"
 
 
-#: requesters open with a greeting far more often than not.
-_PLEASANTRIES = re.compile(
-    r"^\s*(hi|hello|dear|hey)?[\s,]*((the\s+)?team|all|support)?[\s,]*"
-    r"(could you|can you|would you|please|pls|kindly)*[\s,]*", re.I)
+#: requesters open with a greeting far more often than not — and often stack
+#: several ("Hello, could you please ..."), so strip them one at a time.
+_OPENERS = ("hi", "hello", "dear", "hey", "could you", "can you", "would you",
+            "please", "pls", "kindly")
 
 
 def _title(summary: str, limit: int = 110) -> str:
     """A PRDT summary should read as a title, not as the requester's paragraph."""
-    text = " ".join(_PLEASANTRIES.sub("", (summary or "").strip()).split())
-    text = text.strip(' "\'')
+    text = " ".join((summary or "").strip().split())
+    for _ in range(4):
+        low = text.lower()
+        opener = next((o for o in _OPENERS if low.startswith(o)), None)
+        if not opener:
+            break
+        text = text[len(opener):].lstrip(" ,")
+    # Strip a WRAPPING pair of quotes only. A blanket strip of quote characters
+    # eats the closing quote of a title like: Add locations "A" and "B"
+    while len(text) > 1 and text[0] == text[-1] and text[0] in "\"'":
+        text = text[1:-1].strip()
     if text:
         text = text[0].upper() + text[1:]
     if len(text) <= limit:
         return text
     cut = text[:limit].rsplit(" ", 1)[0]
-    return cut.rstrip(",;:") + "…"
+    return cut.rstrip(",;:") + "\u2026"
 
 
 def _blob(issue: dict) -> str:

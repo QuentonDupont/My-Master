@@ -225,19 +225,29 @@ def run(board_id: str | None = None, sample_size: int = 25) -> Report:  # noqa: 
     # -- link type ---------------------------------------------------------
     want_link = dev_cfg.get("link_type")
     try:
-        names = set()
-        for lt in client.issue_link_types():
-            names.update({lt.get("name"), lt.get("inward"), lt.get("outward")})
-        names.discard(None)
-        if want_link in names:
-            report.add("link_type", PASS, f"{want_link!r} exists",
+        types = client.issue_link_types()
+        names = {lt.get("name") for lt in types if lt.get("name")}
+        match = next((lt for lt in types if lt.get("name") == want_link), None)
+        if match:
+            report.add("link_type", PASS,
+                       f"{want_link!r} — reads as \"{config.dev_project()} "
+                       f"{match.get('inward')} {config.intake_project()}\"",
                        key="development.link_type")
         else:
+            # The API takes the type NAME; the inward/outward text is only a
+            # description, and accepting it here would pass a config that fails
+            # at execution.
+            by_phrase = next((lt for lt in types
+                              if want_link in (lt.get("inward"), lt.get("outward"))),
+                             None)
             report.add("link_type", FAIL,
-                       f"{want_link!r} not found. Available: "
-                       + ", ".join(sorted(n for n in names if n)[:12]),
+                       f"{want_link!r} is not a link type name."
+                       + (f" It is the {'inward' if by_phrase and by_phrase.get('inward') == want_link else 'outward'}"
+                          f" description of {by_phrase['name']!r}." if by_phrase else
+                          f" Available: {', '.join(sorted(names)[:10])}"),
                        key="development.link_type",
-                       fix="set development.link_type to a real link type name")
+                       fix=(f"set development.link_type to {by_phrase['name']!r}"
+                            if by_phrase else "use one of the names above"))
     except JiraError as exc:
         report.add("link_type", FAIL, str(exc)[:160])
 

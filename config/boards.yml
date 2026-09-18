@@ -36,7 +36,9 @@ development:
     - Live
     - Closed - Won't Do
   default_priority: Medium
-  link_type: is cloned by
+  # The Jira API takes the link TYPE name here, not the inward/outward
+  # description. 'Cloners' reads as "PRDT-x is cloned by PESD1-y".
+  link_type: Cloners
   # Fields PRDT demands on create. Discover them with:
   #   python -m core.jira_client issue-types --project PRDT --required
   # Each entry is a Jira field id and the value object the API expects.

@@ -44,6 +44,16 @@ class PipelineTests(unittest.TestCase):
                 self.assertEqual(P.validate(proposal.to_dict()), [],
                                  f"{proposal.proposal_id} invalid")
 
+    def test_clone_title_keeps_quoted_phrases_intact(self):
+        """A title ending in a quoted name must not lose its closing quote."""
+        from agents.jira_leader.analysis import _title
+        self.assertEqual(_title('Add two new locations in NS - "A" and "B"'),
+                         'Add two new locations in NS - "A" and "B"')
+        self.assertEqual(_title('"Please add pricing labels"'),
+                         "Please add pricing labels")
+        self.assertEqual(_title("Hello, could you please remove the IR number"),
+                         "Remove the IR number")
+
     def test_never_touch_ticket_gets_no_comment_and_no_clone(self):
         with sandbox():
             build_corpus()
