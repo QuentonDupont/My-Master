@@ -133,6 +133,12 @@ make batch      # assemble the approval batch
 make rules      # weekly: propose rules from the corrections log
 ```
 
+Recommendations to action in Jira yourself (the system never deletes a ticket):
+
+```bash
+python3 -m core.recommendations list
+```
+
 Rollback, if something lands wrong:
 
 ```bash

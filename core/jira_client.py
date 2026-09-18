@@ -280,7 +280,10 @@ class JiraWriteClient(_Base):
                         lambda: self._request("POST", "/rest/api/2/issue",
                                               body={"fields": fields}))
 
-    def delete_issue(self, key: str) -> dict:  # undo of create_issue
+    def delete_issue(self, key: str) -> dict:
+        """Undo of create_issue. NOT USED: by the board owner's instruction this
+        system never deletes a ticket — core.execute records a "Close as Won't
+        Do" recommendation instead. Kept so the write/undo pairing stays honest."""
         assert_key_allowed(key)
         return self._do("delete_issue", {"key": key},
                         lambda: self._request("DELETE", f"/rest/api/2/issue/{key}"))

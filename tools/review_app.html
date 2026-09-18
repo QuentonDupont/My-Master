@@ -172,6 +172,21 @@
   .note { margin-top: 9px; font-size: 12px; color: var(--ink-muted); }
   .note.err { color: var(--stop); }
 
+  .recs { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .rec {
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 3px solid var(--warn); border-radius: var(--r); padding: 13px 14px;
+  }
+  .rec h3 { margin: 0; font-size: 14px; font-weight: 600; display: flex;
+            align-items: center; gap: 8px; flex-wrap: wrap; }
+  .rec p { margin: 6px 0 0; font-size: 13.5px; color: var(--ink-muted); }
+  .rec .refs { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 5px; }
+  .rec .refs a { font-family: var(--mono); font-size: 11px; text-decoration: none;
+                 border: 1px solid var(--line); padding: 2px 6px; border-radius: 4px; }
+  .rec .actions { margin-top: 11px; }
+  .rec[data-state="done"] { opacity: 0.6; border-left-color: var(--ok); }
+  .landed { font-family: var(--mono); font-size: 11px; color: var(--ok); }
+
   .section-label {
     margin: 24px 0 2px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
     text-transform: uppercase; color: var(--ink-faint);
@@ -195,6 +210,11 @@
       <button class="chip" data-filter="all" aria-pressed="false">Everything</button>
     </div>
   </header>
+
+  <section id="recs-section" hidden>
+    <div class="section-label">Close as Won't Do — your call, in Jira</div>
+    <div class="recs" id="recs"></div>
+  </section>
 
   <div class="list" id="list"></div>
   <div class="empty" id="empty" hidden></div>
@@ -221,6 +241,7 @@
 
   let db = null;
   let docs = [];
+  let recs = [];
   let filter = "pending";
   const open = new Set();
   const busy = new Set();
@@ -229,20 +250,61 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const actionable = (p) => p.classification === "NEEDS_CODE" || p.classification === "ANSWERABLE";
-  const decided = (p) => p.decision === "approve" || p.decision === "reject";
+  const decided = (p) => p.decision === "approve" || p.decision === "reject"
+    || p.ledger_state === "EXECUTED";
 
   function bucket(p) {
     if (!actionable(p)) return "info";
     return decided(p) ? "decided" : "pending";
   }
 
+  function renderRecs() {
+    const section = document.getElementById("recs-section");
+    const host = document.getElementById("recs");
+    const open = recs.filter((r) => r.state === "open");
+    const shown = open.length ? open : recs.filter((r) => r.state !== "dismissed");
+    section.hidden = shown.length === 0;
+    host.innerHTML = shown.map((r) => `
+      <div class="rec" data-state="${esc(r.state)}">
+        <h3><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.ticket)}</a>
+          <span class="tag escalate">${esc(r.action)}</span>
+          ${r.state === "done" ? '<span class="tag state-approve">closed</span>' : ""}
+        </h3>
+        <p>${esc(r.reason)}</p>
+        ${(r.related || []).length ? `<div class="refs">${r.related.map((k) =>
+          `<a href="${esc(r.base)}${esc(k)}" target="_blank" rel="noopener">${esc(k)}</a>`
+        ).join("")}</div>` : ""}
+        ${r.state === "open" ? `<div class="actions">
+          <button class="btn undo" data-rec="${esc(r.id)}" data-state="done">I closed it</button>
+          <button class="btn undo" data-rec="${esc(r.id)}" data-state="dismissed">Leave it open</button>
+        </div>` : ""}
+      </div>`).join("");
+    host.querySelectorAll("[data-rec]").forEach((el) => {
+      el.onclick = async () => {
+        if (!db) return;
+        el.disabled = true;
+        try {
+          await db.doc("recommendations/" + el.dataset.rec).update({
+            state: el.dataset.state, resolved_at: new Date().toISOString(),
+          });
+        } catch (e) {
+          el.disabled = false;
+        }
+      };
+    });
+  }
+
   function render() {
+    renderRecs();
     const buckets = { pending: 0, decided: 0, info: 0 };
     docs.forEach((p) => { buckets[bucket(p)] += 1; });
     countsEl.innerHTML =
       `<span><b>${buckets.pending}</b> waiting</span>` +
       `<span><b>${buckets.decided}</b> decided</span>` +
-      `<span><b>${buckets.info}</b> escalated</span>`;
+      `<span><b>${buckets.info}</b> escalated</span>` +
+      (recs.filter((r) => r.state === "open").length
+        ? `<span><b>${recs.filter((r) => r.state === "open").length}</b> to close</span>`
+        : "");
 
     const shown = docs
       .filter((p) => filter === "all" || bucket(p) === filter)
@@ -273,6 +335,7 @@
               <span class="key">${esc(p.ticket)}</span>
               <span class="tag ${cls}">${esc((p.classification || "").replace("_", " "))}</span>
               ${state}
+            ${p.clone_key ? `<span class="landed">→ ${esc(p.clone_key)}</span>` : ""}
             </span>
             <p class="req">${esc(p.requirement)}</p>
             ${(p.flags || []).length ? `<span class="flags">${p.flags.map(
@@ -441,6 +504,8 @@
       decision: d.decision || "pending",
       note: d.note || "",
       assignee_override: d.assignee_override || null,
+      clone_key: d.clone_key || "",
+      ledger_state: d.ledger_state || "",
       generated: d.generated || "",
     };
   }
@@ -454,6 +519,21 @@
       emptyEl.textContent = "This view cannot reach the proposal store. Open the page from your own Claude account.";
       return;
     }
+    db.collection("recommendations").onSnapshot(
+      (snap) => {
+        recs = snap.docs.map((d) => {
+          const v = d.data() || {};
+          return {
+            id: d.id, ticket: v.ticket || d.id, url: v.url || "#",
+            action: v.action || "Review", reason: v.reason || "",
+            related: Array.isArray(v.related) ? v.related : [],
+            base: v.base || "", state: v.state || "open",
+          };
+        });
+        render();
+      },
+      () => {},
+    );
     db.collection("proposals").onSnapshot(
       (snap) => {
         docs = snap.docs.map(toRow);

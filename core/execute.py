@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from core import config, ledger as ledger_mod, log, proposals
+from core import config, ledger as ledger_mod, log, proposals, recommendations
 from core.jira_client import JiraReadClient, JiraWriteClient
 
 LOG = log.get("execute")
@@ -334,8 +334,16 @@ def undo(ticket_key: str, *, execute: bool = False,
             link_id = writer.find_link_id(row["clone_key"], ticket_key) if execute else None
             if link_id:
                 step("unlink", lambda: writer.delete_link(link_id), {"link_id": link_id})
-            step("delete_clone", lambda: writer.delete_issue(row["clone_key"]),
-                 {"key": row["clone_key"]})
+            # The system does not delete tickets. The clone stays, unassigned and
+            # unlinked, and closing it is recommended to the human.
+            if execute:
+                recommendations.recommend_close(
+                    row["clone_key"],
+                    f"created for {ticket_key}, whose execution was rolled back",
+                    source_ticket=ticket_key)
+            result.steps.append(StepResult("recommend_close", True,
+                                           {"key": row["clone_key"],
+                                            "action": recommendations.CLOSE}))
         if row["comment_id"]:
             step("delete_comment",
                  lambda: writer.delete_comment(ticket_key, row["comment_id"]),
@@ -400,16 +408,15 @@ def cleanup_partial(ticket_key: str, *, execute: bool = False,
                 result.ok = False
 
         if row["clone_key"]:
-            detail = {"key": row["clone_key"]}
-            try:
-                writer.delete_issue(row["clone_key"])
-                led.journal(ticket_key, proposal.proposal_id, "cleanup.delete_clone",
-                            True, detail)
-                result.steps.append(StepResult("cleanup.delete_clone", True, detail))
-            except Exception as exc:
-                result.steps.append(StepResult("cleanup.delete_clone", False, detail,
-                                               str(exc)))
-                result.ok = False
+            detail = {"key": row["clone_key"], "action": recommendations.CLOSE}
+            if execute:
+                recommendations.recommend_close(
+                    row["clone_key"],
+                    f"created by a half-finished execution of {ticket_key}",
+                    source_ticket=ticket_key)
+            led.journal(ticket_key, proposal.proposal_id, "cleanup.recommend_close",
+                        True, detail)
+            result.steps.append(StepResult("cleanup.recommend_close", True, detail))
 
         if execute and result.ok:
             led.note_progress(ticket_key, comment_id=None, clone_key=None)

@@ -38,6 +38,11 @@ Do not query, write to, or reason about any other Jira project.
    Never log a token, never print one, never paste one into a comment or ticket.
 8. **Every write is reversible.** If you add a write action, you add its undo in the
    same commit.
+9. **Never delete a ticket.** Not a PESD1 ticket, not a PRDT clone, not one the
+   system created itself and not one created by mistake. A clone that should not
+   exist is unassigned, unlinked, and recorded as a **"Close as Won't Do"**
+   recommendation for the human to action in Jira. `undo()` reverts everything
+   else; closing is a human decision.
 
 ---
 

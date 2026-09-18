@@ -25,7 +25,8 @@ LOG = log.get("mobile")
 REVIEWABLE = (ledger_mod.PROPOSED,)
 
 
-def to_document(proposal: proposals.Proposal, stamp: str) -> dict:
+def to_document(proposal: proposals.Proposal, stamp: str,
+                row: dict | None = None) -> dict:
     """One proposal, shaped for the review page."""
     d = proposal.to_dict()
     clone = d["clone"]
@@ -56,6 +57,8 @@ def to_document(proposal: proposals.Proposal, stamp: str) -> dict:
         "note": "",
         "assignee_override": None,
         "decided_at": None,
+        "ledger_state": (row or {}).get("state", ""),
+        "clone_key": (row or {}).get("clone_key") or "",
         "generated": stamp,
     }
 
@@ -68,7 +71,9 @@ def export(out_dir: Path, led: ledger_mod.Ledger | None = None) -> list[str]:
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = dt.datetime.now().strftime("%d %b %H:%M")
         written = []
-        states = REVIEWABLE + (ledger_mod.ESCALATED, ledger_mod.DUPLICATE)
+        states = REVIEWABLE + (ledger_mod.ESCALATED, ledger_mod.DUPLICATE,
+                               ledger_mod.APPROVED, ledger_mod.CORRECTED,
+                               ledger_mod.EXECUTED)
         for row in led.by_state(*states):
             if not row["proposal_id"]:
                 continue
@@ -77,14 +82,31 @@ def export(out_dir: Path, led: ledger_mod.Ledger | None = None) -> list[str]:
             except FileNotFoundError:
                 continue
             path = out_dir / f"{proposal.proposal_id}.json"
-            path.write_text(json.dumps(to_document(proposal, stamp), indent=1),
-                            encoding="utf-8")
+            path.write_text(
+                json.dumps(to_document(proposal, stamp, row), indent=1),
+                encoding="utf-8")
             written.append(str(path))
         LOG.info("mobile.export", documents=len(written), out=str(out_dir))
         return written
     finally:
         if own:
             led.close()
+
+
+def recommendation_documents() -> list[dict]:
+    """Open "Close as Won't Do" items, shaped for the review page."""
+    from core import recommendations
+
+    return [{
+        "id": r["id"],
+        "ticket": r["ticket"],
+        "url": r["ticket_url"],
+        "action": r["action"],
+        "reason": r["reason"],
+        "related": r.get("related") or [],
+        "base": config.base_url() + "/browse/",
+        "state": r.get("state", "open"),
+    } for r in recommendations.load()]
 
 
 def apply(decisions: list[dict], led: ledger_mod.Ledger | None = None) -> dict:
@@ -178,6 +200,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "export":
         for path in export(Path(args.out)):
             print(path)
+        recs = recommendation_documents()
+        if recs:
+            out = Path(args.out) / "recommendations"
+            out.mkdir(parents=True, exist_ok=True)
+            for rec in recs:
+                (out / f"{rec['id'].replace(':', '_').replace(chr(39), '')}.json"
+                 ).write_text(json.dumps(rec, indent=1), encoding="utf-8")
+                print(out / f"{rec['id'].replace(':', '_').replace(chr(39), '')}.json")
     else:
         raw = json.loads(Path(args.path).read_text(encoding="utf-8"))
         items = raw.get("items", raw) if isinstance(raw, dict) else raw

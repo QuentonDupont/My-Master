@@ -184,6 +184,24 @@ class ExecuteTests(unittest.TestCase):
                 journal = [j["step"] for j in led.journal_for(proposal.ticket)]
                 self.assertIn("assign", journal)
 
+    def test_undo_never_deletes_a_ticket(self):
+        """The board owner's rule: the system does not delete tickets. A clone
+        that should not exist is unassigned, unlinked, and recommended for
+        closing — the human decides."""
+        from core import recommendations
+        with sandbox():
+            with L.Ledger() as led:
+                proposal = approved_proposal(led)
+                E.execute_proposal(proposal.proposal_id, execute=True, ledger=led,
+                                   writer=FakeWriter(), reader=FakeReader())
+                undo_writer = FakeWriter()
+                E.undo(proposal.ticket, execute=True, ledger=led, writer=undo_writer)
+                self.assertNotIn("delete_issue", [c[0] for c in undo_writer.calls])
+                open_items = recommendations.open_items()
+                self.assertEqual(len(open_items), 1)
+                self.assertEqual(open_items[0]["ticket"], "PRDT-999")
+                self.assertEqual(open_items[0]["action"], recommendations.CLOSE)
+
     def test_undo_reverses_every_write(self):
         with sandbox():
             with L.Ledger() as led:
@@ -197,7 +215,7 @@ class ExecuteTests(unittest.TestCase):
                 self.assertTrue(result.ok)
                 names = [c[0] for c in undo_writer.calls]
                 self.assertEqual(names, ["transition", "unassign", "delete_link",
-                                         "delete_issue", "delete_comment"])
+                                         "delete_comment"])
                 row = led.get(proposal.ticket)
                 self.assertEqual(row["state"], L.ROLLED_BACK)
                 self.assertIsNone(row["clone_key"])
