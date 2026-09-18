@@ -1,0 +1,37 @@
+[
+  {
+    "channel": "C0STOCK", "channel_name": "ops-tech", "thread_ts": "1726300000.001",
+    "user": "U100", "user_name": "Warehouse Ops TH",
+    "permalink": "https://pomelo.slack.com/archives/C0STOCK/p1726300000001",
+    "messages": [
+      {"ts": "1726300000.001", "user": "U100",
+       "text": "<@UBOT> stock levels are not updating after the bulk import on the THA warehouse, the storefront still shows the old numbers"}
+    ]
+  },
+  {
+    "channel": "C0CS", "channel_name": "customer-support", "thread_ts": "1726300100.002",
+    "user": "U200", "user_name": "CS Team",
+    "permalink": "https://pomelo.slack.com/archives/C0CS/p1726300100002",
+    "messages": [
+      {"ts": "1726300100.002", "user": "U200",
+       "text": "<@UBOT> can you process the refund for order TH-993120 again? the customer says it never arrived"}
+    ]
+  },
+  {
+    "channel": "C0RANDOM", "channel_name": "random", "thread_ts": "1726300200.003",
+    "user": "U300", "user_name": "Store Ops",
+    "permalink": "https://pomelo.slack.com/archives/C0RANDOM/p1726300200003",
+    "messages": [
+      {"ts": "1726300200.003", "user": "U300", "text": "<@UBOT> it's broken again, pls fix"}
+    ]
+  },
+  {
+    "channel": "C0MERCH", "channel_name": "merchandising", "thread_ts": "1726300300.004",
+    "user": "U400", "user_name": "Merch Team",
+    "permalink": "https://pomelo.slack.com/archives/C0MERCH/p1726300300004",
+    "messages": [
+      {"ts": "1726300300.004", "user": "U400",
+       "text": "<@UBOT> where do I find the daily order report? I need the export for the merchandising review"}
+    ]
+  }
+]

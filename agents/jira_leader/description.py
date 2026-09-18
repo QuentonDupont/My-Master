@@ -141,6 +141,22 @@ def _table(rows: list[list[str]], headers: list[str]) -> list[str]:
     return out
 
 
+def relevant_procedures(retrieval, text: str, limit: int = 2) -> list[dict]:
+    """Pages whose TITLE is about the subject of the request.
+
+    A score alone cannot separate "New Retail Location V1" (0.38, exactly right)
+    from "SG Store Visit - Engineers 28 Jun 2019" (0.43, matched deep in its
+    body). Shared here so a Slack reply and a clone description agree on what
+    counts as the procedure.
+    """
+    from corpus.index import keywords as _keywords
+
+    subject = set(_keywords(text, 25))
+    return [d for d in retrieval.sops
+            if d.get("similarity", 0) >= PROCEDURE_MIN_SIMILARITY
+            and subject & set(_keywords(d.get("title") or "", 20))][:limit]
+
+
 def build(issue: dict, retrieval, analysis, requester=None) -> str:
     """The clone description.
 
@@ -202,12 +218,7 @@ def build(issue: dict, retrieval, analysis, requester=None) -> str:
 
     # -- evidence, as links ------------------------------------------------
     pointers = []
-    from corpus.index import keywords as _keywords
-
-    subject_terms = set(_keywords(f"{summary} {body}", 25))
-    procedures = [d for d in retrieval.sops
-                  if d.get("similarity", 0) >= PROCEDURE_MIN_SIMILARITY
-                  and subject_terms & set(_keywords(d.get("title") or "", 20))]
+    procedures = relevant_procedures(retrieval, f"{summary} {body}", limit=2)
     for sop in procedures[:2]:
         link = sop.get("url") or ""
         title = f"[{sop['title']}|{link}]" if str(link).startswith("http") else sop["title"]

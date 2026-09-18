@@ -16,7 +16,8 @@ demo: demo-reset  ## full offline run: corpus -> triage -> review batch -> brief
 
 demo-reset:  ## wipe local state (ledger, proposals, batches, logs)
 	rm -f corpus/ledger.db corpus/ledger.db-wal corpus/ledger.db-shm
-	rm -rf review/proposals review/batch_* review/brief_* review/rule_proposals_*
+	rm -rf review/proposals review/slack_proposals review/batch_* review/brief_*
+	rm -rf review/rule_proposals_* review/mobile
 	rm -f logs/*.jsonl
 
 queue:  ## poll PESD1 and triage (live; needs .env)
@@ -24,6 +25,9 @@ queue:  ## poll PESD1 and triage (live; needs .env)
 
 batch:  ## assemble the approval batch
 	python3 -m agents.jira_leader.batch assemble
+
+slack:  ## triage Slack mentions (offline fixtures)
+	python3 -m agents.slack_leader.leader run --file tests/fixtures/mentions.json
 
 brief:  ## morning brief
 	python3 -m agents.chief_of_staff.brief brief
