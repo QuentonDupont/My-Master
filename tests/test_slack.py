@@ -194,3 +194,95 @@ class SlackProposalValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConnectorModeTests(unittest.TestCase):
+    """Replies posted by the connector under the approver's own Slack identity."""
+
+    def _approved(self, led):
+        slack_led = L.SlackLedger(led)
+        run_mentions()
+        proposal = next(p for p in SP.load_all() if p.proposed_reply)
+        key = slack_led.key(proposal.channel, proposal.thread_ts)
+        slack_led.transition(key, L.APPROVED)
+        return proposal, key
+
+    def test_recording_requires_an_approved_proposal(self):
+        with sandbox():
+            build_corpus()
+            with L.Ledger() as led:
+                run_mentions()
+                proposal = next(p for p in SP.load_all() if p.proposed_reply)
+                with self.assertRaises(SE.ExecutionRefused):
+                    SE.record_external_reply(proposal.proposal_id, "1.1",
+                                             posted_as="Someone", execute=True,
+                                             ledger=led)
+
+    def test_recording_marks_the_thread_answered_and_says_who_posted(self):
+        with sandbox():
+            build_corpus()
+            with L.Ledger() as led:
+                proposal, key = self._approved(led)
+                out = SE.record_external_reply(proposal.proposal_id, "1726400000.1",
+                                               posted_as="Quenton Du Pont",
+                                               execute=True, ledger=led)
+                self.assertTrue(out["ok"])
+                row = L.SlackLedger(led).get(key)
+                self.assertEqual(row["state"], L.EXECUTED)
+                self.assertEqual(row["reply_ts"], "1726400000.1")
+                self.assertIn("Quenton Du Pont", row["last_error"])
+                journal = [j["step"] for j in led.journal_for(key)]
+                self.assertIn("slack.reply.external", journal)
+
+    def test_an_escalation_cannot_be_recorded_either(self):
+        with sandbox():
+            build_corpus()
+            with L.Ledger() as led:
+                slack_led = L.SlackLedger(led)
+                run_mentions()
+                escalated = next(p for p in SP.load_all() if p.kind == SP.ESCALATE)
+                key = slack_led.key(escalated.channel, escalated.thread_ts)
+                with self.assertRaises(SE.ExecutionRefused):
+                    SE.record_external_reply(escalated.proposal_id, "1.1",
+                                             posted_as="Q", execute=True, ledger=led)
+
+    def test_a_thread_cannot_be_answered_twice_across_modes(self):
+        with sandbox():
+            build_corpus()
+            with L.Ledger() as led:
+                proposal, key = self._approved(led)
+                SE.record_external_reply(proposal.proposal_id, "1.1", posted_as="Q",
+                                         execute=True, ledger=led)
+                with self.assertRaises(SE.ExecutionRefused):
+                    SE.execute_reply(proposal.proposal_id, execute=True, ledger=led,
+                                     writer=FakeSlackWriter())
+
+    def test_editing_a_reply_on_the_phone_is_a_correction(self):
+        from agents.slack_leader import mobile as slack_mobile
+        from core import corrections
+        with sandbox():
+            build_corpus()
+            with L.Ledger() as led:
+                run_mentions()
+                proposal = next(p for p in SP.load_all() if p.proposed_reply)
+                out = slack_mobile.apply([{"proposal_id": proposal.proposal_id,
+                                           "decision": "approve",
+                                           "edited_reply": "Shorter answer.",
+                                           "note": "too long"}], led)
+                self.assertEqual(out["corrected"], [proposal.proposal_id])
+                self.assertEqual(SP.load(proposal.proposal_id).proposed_reply,
+                                 "Shorter answer.")
+                self.assertTrue(any(c["field"] == "proposed_reply"
+                                    for c in corrections.load()))
+
+    def test_ready_to_post_lists_what_the_connector_should_send(self):
+        from agents.slack_leader import mobile as slack_mobile
+        with sandbox():
+            build_corpus()
+            with L.Ledger() as led:
+                proposal, key = self._approved(led)
+                ready = slack_mobile.ready_to_post(led)
+                self.assertEqual(len(ready), 1)
+                self.assertEqual(ready[0]["channel"], proposal.channel)
+                self.assertEqual(ready[0]["thread_ts"], proposal.thread_ts)
+                self.assertTrue(ready[0]["text"])

@@ -219,6 +219,7 @@
       <button class="chip" data-filter="decided" aria-pressed="false">Decided</button>
       <button class="chip" data-filter="info" aria-pressed="false">Escalations</button>
       <button class="chip" data-filter="all" aria-pressed="false">Everything</button>
+      <button class="chip" data-filter="slack" aria-pressed="false">Slack replies</button>
       <button class="chip" data-filter="boards" aria-pressed="false">Board priorities</button>
     </div>
   </header>
@@ -226,6 +227,11 @@
   <section id="recs-section" hidden>
     <div class="section-label">Close as Won't Do — your call, in Jira</div>
     <div class="recs" id="recs"></div>
+  </section>
+
+  <section id="slack-section" hidden>
+    <div class="section-label" id="slack-label"></div>
+    <div class="recs" id="slack"></div>
   </section>
 
   <section id="boards-section" hidden>
@@ -260,6 +266,7 @@
   let docs = [];
   let recs = [];
   let boardItems = [];
+  let slackItems = [];
   const PRIORITY_STRIPE = {
     Critical: "var(--stop)", High: "var(--accent)",
     Medium: "var(--warn)", Low: "var(--line-strong)",
@@ -337,8 +344,79 @@
       </div>`).join("");
   }
 
+  function renderSlack() {
+    const section = document.getElementById("slack-section");
+    const host = document.getElementById("slack");
+    const label = document.getElementById("slack-label");
+    section.hidden = filter !== "slack";
+    if (section.hidden) return;
+    const pending = slackItems.filter((s) => s.decision === "pending"
+      && s.kind !== "ESCALATE");
+    label.textContent = slackItems.length
+      ? `${pending.length} reply${pending.length === 1 ? "" : "s"} waiting on you`
+      : "No Slack mentions yet — the Slack Leader has not seen any.";
+    host.innerHTML = slackItems.map((s) => {
+      const silent = s.kind === "ESCALATE";
+      const done = s.decision !== "pending" || s.state === "EXECUTED";
+      return `
+      <div class="rec" data-state="${done ? "done" : "open"}"
+           style="border-left-color:${silent ? "var(--warn)" : "var(--accent)"}">
+        <h3>#${esc(s.channel_name)}
+          <span class="tag ${silent ? "escalate" : "code"}">${esc(s.kind)}</span>
+          ${s.state === "EXECUTED" ? '<span class="tag state-approve">sent</span>' : ""}
+          ${s.decision === "reject" ? '<span class="tag state-reject">rejected</span>' : ""}
+        </h3>
+        <p>${esc(s.asked_by)} asked: ${esc(s.question)}</p>
+        ${s.permalink ? `<div class="refs"><a href="${esc(s.permalink)}" target="_blank" rel="noopener">open the thread</a></div>` : ""}
+        ${silent
+          ? `<div class="note">No reply will be sent. ${esc((s.flags || []).join(", "))}</div>`
+          : `<div class="quote" style="margin-top:9px">${esc(s.reply)}</div>
+             ${s.posts_as ? `<div class="note">Posts as ${esc(s.posts_as)}</div>` : ""}
+             ${done ? "" : `
+             <div class="field">
+               <div class="label">Edit before sending</div>
+               <textarea id="sreply-${esc(s.proposal_id)}" data-sreply="${esc(s.proposal_id)}"
+                 placeholder="Leave blank to send it as written">${esc(s.edited_reply || "")}</textarea>
+               <div class="actions">
+                 <button class="btn approve" data-sact="approve" data-sid="${esc(s.proposal_id)}">Send this</button>
+                 <button class="btn reject" data-sact="reject" data-sid="${esc(s.proposal_id)}">Don't send</button>
+               </div>
+             </div>`}`}
+      </div>`;
+    }).join("");
+
+    host.querySelectorAll("[data-sact]").forEach((el) => {
+      el.onclick = async () => {
+        if (!db) return;
+        const id = el.dataset.sid;
+        const box = document.getElementById("sreply-" + id);
+        const edited = box ? box.value.trim() : "";
+        if (el.dataset.sact === "reject" && !edited) {
+          const item = slackItems.find((s) => s.proposal_id === id);
+          if (item && !item.note) {
+            box && box.setAttribute("placeholder", "Say why, so it learns from it");
+            box && box.focus();
+            return;
+          }
+        }
+        el.disabled = true;
+        try {
+          await db.doc("slack_proposals/" + id).update({
+            decision: el.dataset.sact,
+            edited_reply: edited,
+            note: el.dataset.sact === "reject" ? edited : "",
+            decided_at: new Date().toISOString(),
+          });
+        } catch (e) {
+          el.disabled = false;
+        }
+      };
+    });
+  }
+
   function render() {
     renderRecs();
+    renderSlack();
     renderBoards();
     const buckets = { pending: 0, decided: 0, info: 0 };
     docs.forEach((p) => { buckets[bucket(p)] += 1; });
@@ -346,17 +424,20 @@
       `<span><b>${buckets.pending}</b> waiting</span>` +
       `<span><b>${buckets.decided}</b> decided</span>` +
       `<span><b>${buckets.info}</b> escalated</span>` +
+      (slackItems.filter((s) => s.decision === "pending" && s.kind !== "ESCALATE").length
+        ? `<span><b>${slackItems.filter((s) => s.decision === "pending" && s.kind !== "ESCALATE").length}</b> slack</span>`
+        : "") +
       (recs.filter((r) => r.state === "open").length
         ? `<span><b>${recs.filter((r) => r.state === "open").length}</b> to close</span>`
         : "");
 
-    const shown = filter === "boards" ? [] : docs
+    const shown = (filter === "boards" || filter === "slack") ? [] : docs
       .filter((p) => filter === "all" || bucket(p) === filter)
       .sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
 
     listEl.innerHTML = shown.map(card).join("");
-    emptyEl.hidden = shown.length > 0 || filter === "boards";
-    if (!shown.length && filter !== "boards") {
+    emptyEl.hidden = shown.length > 0 || filter === "boards" || filter === "slack";
+    if (!shown.length && filter !== "boards" && filter !== "slack") {
       emptyEl.textContent = filter === "pending"
         ? "Nothing waiting on you. New proposals appear here after the next triage run."
         : "Nothing here yet.";
@@ -563,6 +644,26 @@
       emptyEl.textContent = "This view cannot reach the proposal store. Open the page from your own Claude account.";
       return;
     }
+    db.collection("slack_proposals").onSnapshot(
+      (snap) => {
+        slackItems = snap.docs.map((d) => {
+          const v = d.data() || {};
+          return {
+            proposal_id: v.proposal_id || d.id,
+            channel_name: v.channel_name || v.channel || "",
+            asked_by: v.asked_by || "someone", question: v.question || "",
+            kind: v.kind || "ANSWER", reply: v.reply || "",
+            permalink: v.permalink || "", posts_as: v.posts_as || "",
+            flags: Array.isArray(v.flags) ? v.flags : [],
+            decision: v.decision || "pending", state: v.state || "",
+            edited_reply: v.edited_reply || "", note: v.note || "",
+            confidence: v.confidence || 0,
+          };
+        }).sort((a, b) => b.confidence - a.confidence);
+        render();
+      },
+      () => {},
+    );
     db.collection("board_items").onSnapshot(
       (snap) => {
         boardItems = snap.docs.map((d) => {

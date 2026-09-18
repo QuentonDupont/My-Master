@@ -78,6 +78,54 @@ def execute_reply(proposal_id: str, *, execute: bool = False,
             led.close()
 
 
+def record_external_reply(proposal_id: str, reply_ts: str, *, posted_as: str,
+                          via: str = "claude.ai Slack connector",
+                          execute: bool = False,
+                          ledger: ledger_mod.Ledger | None = None) -> dict:
+    """Record a reply that was posted through the viewer's Slack connector.
+
+    Connector mode: the page approves, and the connector — which lives in the
+    Claude session, not in this process — does the posting under the approver's
+    own Slack identity. The guarantee that matters is unchanged and enforced
+    here: no reply exists without an approved proposal. What changes is who
+    made the call, so the ledger records that, and under whose name.
+    """
+    own_ledger = ledger is None
+    led = ledger or ledger_mod.Ledger()
+    slack_led = ledger_mod.SlackLedger(led)
+    try:
+        proposal = slack_proposals.load(proposal_id)
+        row = slack_led.by_proposal(proposal_id)
+        if row is None:
+            raise ExecutionRefused(f"{proposal_id} is not against a tracked thread")
+        if row["state"] == ledger_mod.EXECUTED:
+            raise ExecutionRefused(f"{row['thread_key']} already answered")
+        if row["state"] not in EXECUTABLE_STATES:
+            raise ExecutionRefused(
+                f"{row['thread_key']} is {row['state']}; a reply may only be "
+                f"recorded for an approved proposal")
+        if proposal.kind == slack_proposals.ESCALATE:
+            raise ExecutionRefused("ESCALATE proposals stay silent by design")
+        if not reply_ts:
+            raise ExecutionRefused("a recorded reply needs the message timestamp")
+
+        detail = {"ts": reply_ts, "via": via, "posted_as": posted_as,
+                  "channel": proposal.channel}
+        if execute:
+            led.journal(row["thread_key"], proposal_id, "slack.reply.external", True,
+                        detail)
+            slack_led.transition(row["thread_key"], ledger_mod.EXECUTED,
+                                 reply_ts=reply_ts,
+                                 last_error=f"posted via {via} as {posted_as}")
+        LOG.info("slack_execute.external", thread=row["thread_key"], **detail)
+        return {"proposal_id": proposal_id, "thread": row["thread_key"],
+                "dry_run": not execute, "ok": True, "reply_ts": reply_ts,
+                "via": via, "posted_as": posted_as}
+    finally:
+        if own_ledger:
+            led.close()
+
+
 def undo_reply(thread_key: str, *, execute: bool = False,
                ledger: ledger_mod.Ledger | None = None,
                writer: SlackWriteClient | None = None) -> dict:
@@ -118,15 +166,26 @@ def main(argv: list[str] | None = None) -> int:
     p_run = sub.add_parser("run")
     p_run.add_argument("proposal_id")
     p_run.add_argument("--execute", action="store_true")
+    p_rec = sub.add_parser("record",
+                           help="record a reply posted through the Slack connector")
+    p_rec.add_argument("proposal_id")
+    p_rec.add_argument("--ts", required=True, help="the posted message timestamp")
+    p_rec.add_argument("--as", dest="posted_as", required=True)
+    p_rec.add_argument("--execute", action="store_true")
     p_undo = sub.add_parser("undo")
     p_undo.add_argument("thread_key")
     p_undo.add_argument("--execute", action="store_true")
     args = ap.parse_args(argv)
 
     try:
-        out = (execute_reply(args.proposal_id, execute=args.execute)
-               if args.cmd == "run"
-               else undo_reply(args.thread_key, execute=args.execute))
+        if args.cmd == "run":
+            out = execute_reply(args.proposal_id, execute=args.execute)
+        elif args.cmd == "record":
+            out = record_external_reply(args.proposal_id, args.ts,
+                                        posted_as=args.posted_as,
+                                        execute=args.execute)
+        else:
+            out = undo_reply(args.thread_key, execute=args.execute)
     except ExecutionRefused as exc:
         print(f"REFUSED: {exc}")
         return 2
