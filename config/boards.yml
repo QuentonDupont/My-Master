@@ -35,6 +35,12 @@ development:
   resolved_statuses:
     - Live
     - Closed - Won't Do
+  # Priority is CARRIED from the PESD1 ticket — the requester's urgency is the
+  # fact, not something to re-derive. default_priority applies only when the
+  # source ticket has none. Use priority_map if the two boards ever disagree on
+  # names (both currently use Critical / High / Medium / Low).
+  carry_priority: true
+  priority_map: {}
   default_priority: Medium
   # The Jira API takes the link TYPE name here, not the inward/outward
   # description. 'Cloners' reads as "PRDT-x is cloned by PESD1-y".

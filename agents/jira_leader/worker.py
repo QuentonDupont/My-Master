@@ -173,6 +173,10 @@ def process(issue: dict, *, ledger: ledger_mod.Ledger | None = None,
                 f"{summary} {description}", labels=analysis.labels,
                 components=research.components)
             first = candidates[0] if candidates else None
+            priority, priority_why, priority_flags = analysis_mod.clone_priority(issue)
+            flags.extend(priority_flags)
+            LOG.info("worker.priority", ticket=key, priority=priority,
+                     why=priority_why)
             clone = proposals.Clone(
                 target_project=config.dev_project(),
                 summary=analysis.clone_summary or summary,
@@ -183,7 +187,7 @@ def process(issue: dict, *, ledger: ledger_mod.Ledger | None = None,
                 assignee_alternates=[c["assignee"] for c in candidates[1:]] or
                                     ([first["assignee"]] if first else ["unassigned"]),
                 labels=analysis.labels,
-                priority=config.boards()["development"]["default_priority"],
+                priority=priority,
                 link_type=config.boards()["development"]["link_type"])
             transition = config.boards()["intake"]["dev_transition"]
             if not candidates:

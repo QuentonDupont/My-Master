@@ -119,6 +119,44 @@ def _title(summary: str, limit: int = 110) -> str:
     return cut.rstrip(",;:") + "\u2026"
 
 
+#: text that claims urgency the priority field may not reflect
+URGENCY_SIGNALS = ("critical", "urgent", "asap", "blocker", "blocking", "oversell",
+                   "customers affected", "cannot ship", "stuck", "immediately",
+                   "today", "escalat")
+
+PRIORITY_ORDER = ["Low", "Medium", "High", "Critical"]
+
+
+def clone_priority(issue: dict) -> tuple[str, str, list[str]]:
+    """(priority, why, flags) for the clone.
+
+    The requester's urgency is a fact recorded on the PESD1 ticket, so it is
+    carried across rather than re-derived. Text that claims more urgency than
+    the field shows is flagged for the human, never applied silently.
+    """
+    dev = config.boards()["development"]
+    fields = issue.get("fields", {}) or {}
+    source = ((fields.get("priority") or {}) or {}).get("name")
+    fallback = dev.get("default_priority") or "Medium"
+    flags: list[str] = []
+
+    if not dev.get("carry_priority", True) or not source:
+        why = (f"{issue['key']} has no priority set; using the default"
+               if not source else "carry_priority is off; using the default")
+        return fallback, why, (["priority_defaulted"] if not source else [])
+
+    mapped = (dev.get("priority_map") or {}).get(source, source)
+    why = f"carried from {issue['key']} ({source})"
+
+    blob = f"{fields.get('summary') or ''} {fields.get('description') or ''}".lower()
+    hits = [w for w in URGENCY_SIGNALS if w in blob]
+    if hits and mapped in PRIORITY_ORDER and PRIORITY_ORDER.index(mapped) < \
+            PRIORITY_ORDER.index("High"):
+        flags.append("urgency_language_above_priority")
+        why += f"; the text says {', '.join(hits[:3])} — check the priority is right"
+    return mapped, why, flags
+
+
 def _blob(issue: dict) -> str:
     f = issue.get("fields", {}) or {}
     return f"{f.get('summary') or ''}\n{f.get('description') or ''}"

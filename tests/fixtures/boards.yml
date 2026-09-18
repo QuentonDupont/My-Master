@@ -29,6 +29,8 @@ development:
   resolved_statuses:
     - Done
     - Closed
+  carry_priority: true
+  priority_map: {}
   default_priority: Medium
   link_type: is cloned by
   required_fields: {}

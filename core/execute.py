@@ -458,8 +458,35 @@ def redescribe_clone(ticket_key: str, *, execute: bool = False,
 
         result = ExecutionResult(proposal_id=proposal.proposal_id, ticket=ticket_key,
                                  dry_run=not execute, clone_key=row["clone_key"])
-        previous = (reader.issue(row["clone_key"], fields="description")
-                    .get("fields", {}).get("description") or "")
+
+        # Priority is carried from the PESD1 ticket; a clone created before that
+        # rule existed is sitting on the default.
+        from agents.jira_leader.analysis import clone_priority
+
+        wanted_priority, priority_why, _ = clone_priority(issue)
+        clone_fields_now = reader.issue(row["clone_key"],
+                                        fields="description,priority").get("fields", {})
+        current_priority = ((clone_fields_now.get("priority") or {}) or {}).get("name")
+        if wanted_priority and current_priority != wanted_priority:
+            if execute:
+                led.journal(ticket_key, proposal.proposal_id, "repriority.previous",
+                            True, {"clone": row["clone_key"],
+                                   "priority": current_priority})
+            try:
+                writer.set_priority(row["clone_key"], wanted_priority)
+                if proposal.clone:
+                    proposal.clone.priority = wanted_priority
+                    proposals.save(proposal)
+                result.steps.append(StepResult(
+                    "priority", True, {"key": row["clone_key"],
+                                       "from": current_priority,
+                                       "to": wanted_priority, "why": priority_why}))
+            except Exception as exc:
+                result.ok = False
+                result.steps.append(StepResult("priority", False,
+                                               {"key": row["clone_key"]}, str(exc)))
+
+        previous = clone_fields_now.get("description") or ""
         if previous.strip() == text.strip():
             result.steps.append(StepResult("redescribe", True, {"skipped": "unchanged"}))
             return result

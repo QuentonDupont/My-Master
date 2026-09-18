@@ -172,9 +172,13 @@ def build(issue: dict, retrieval, analysis, requester=None) -> str:
     # -- details -----------------------------------------------------------
     reporter = ((fields.get("reporter") or {}) or {}).get("displayName") or "unknown"
     raised = (fields.get("created") or "")[:10]
+    from agents.jira_leader.analysis import clone_priority
+
+    priority, priority_why, _ = clone_priority(issue)
     rows = [["Source ticket", key],
             ["Reported by", reporter],
-            ["Raised", raised]]
+            ["Raised", raised],
+            ["Priority", f"{priority} — {priority_why}"]]
     if requester is not None and getattr(requester, "email", None):
         rows.append(["Requester", f"{requester.email} ({requester.confidence} confidence)"])
     if ents["names"]:

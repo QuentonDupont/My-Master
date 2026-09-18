@@ -310,6 +310,16 @@ class JiraWriteClient(_Base):
     def restore_description(self, key: str, previous: str) -> dict:  # undo
         return self.set_description(key, previous)
 
+    def set_priority(self, key: str, priority: str) -> dict:
+        assert_key_allowed(key)
+        return self._do("set_priority", {"key": key, "priority": priority},
+                        lambda: self._request("PUT", f"/rest/api/2/issue/{key}",
+                                              body={"fields":
+                                                    {"priority": {"name": priority}}}))
+
+    def restore_priority(self, key: str, previous: str) -> dict:  # undo
+        return self.set_priority(key, previous)
+
     # -- links -------------------------------------------------------------
     def link_issues(self, inward_key: str, outward_key: str, link_type: str) -> dict:
         assert_key_allowed(inward_key)

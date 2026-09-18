@@ -88,6 +88,38 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("3161582", found["references"])
         self.assertNotIn("Add Two", found["names"])
 
+    def test_priority_is_carried_from_the_source_ticket(self):
+        from agents.jira_leader.analysis import clone_priority
+        issue = {"key": "PESD1-1", "fields": {"summary": "s", "description": "",
+                                              "priority": {"name": "Critical"}}}
+        with sandbox():
+            priority, why, flags = clone_priority(issue)
+            self.assertEqual(priority, "Critical")
+            self.assertIn("carried from PESD1-1", why)
+            self.assertEqual(flags, [])
+
+    def test_priority_falls_back_only_when_the_source_has_none(self):
+        from agents.jira_leader.analysis import clone_priority
+        from core import config
+        issue = {"key": "PESD1-2", "fields": {"summary": "s", "description": ""}}
+        with sandbox():
+            priority, why, flags = clone_priority(issue)
+            self.assertEqual(priority,
+                             config.boards()["development"]["default_priority"])
+            self.assertIn("priority_defaulted", flags)
+            self.assertIn("no priority set", why)
+
+    def test_urgent_language_on_a_low_priority_ticket_is_flagged_not_applied(self):
+        from agents.jira_leader.analysis import clone_priority
+        issue = {"key": "PESD1-3",
+                 "fields": {"summary": "URGENT: oversell, fix asap",
+                            "description": "", "priority": {"name": "Low"}}}
+        with sandbox():
+            priority, why, flags = clone_priority(issue)
+            self.assertEqual(priority, "Low", "never raise priority silently")
+            self.assertIn("urgency_language_above_priority", flags)
+            self.assertIn("check the priority is right", why)
+
     def test_never_touch_ticket_gets_no_comment_and_no_clone(self):
         with sandbox():
             build_corpus()
