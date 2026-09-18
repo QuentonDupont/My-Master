@@ -126,8 +126,10 @@ def run(board_id: str | None = None, sample_size: int = 25) -> Report:  # noqa: 
                        fix="set intake.open_status to the real name")
         unresolved = {((i["fields"].get("status") or {}).get("name"))
                       for i in sample if not i["fields"].get("resolution")}
+        terminal = set(intake_cfg.get("resolved_statuses") or [])
         unknown = sorted(s for s in unresolved
-                         if s and s not in intake_cfg["open_statuses"])
+                         if s and s not in intake_cfg["open_statuses"]
+                         and s not in terminal)
         if unknown:
             report.add("open_statuses", WARN,
                        f"unresolved tickets sit in statuses not listed: "

@@ -59,6 +59,24 @@ class HistorianTests(unittest.TestCase):
             counts = [c["count"] for c in candidates]
             self.assertEqual(counts, sorted(counts, reverse=True))
 
+    def test_terminal_statuses_from_boards_yml_count_as_precedent(self):
+        """PESD1 sets no resolution on closed tickets — the status list decides."""
+        from agents.historian.retrieval import Historian as H
+        from core import config
+        with sandbox():
+            self._assert_terminal(H, config)
+
+    def _assert_terminal(self, H, config):
+        terminal = (config.boards()["intake"].get("resolved_statuses") or [])
+        self.assertTrue(terminal, "boards.yml must list the terminal statuses")
+        self.assertTrue(H._is_resolved({"status": terminal[0], "resolution": None}))
+        self.assertTrue(H._is_resolved({"status": terminal[0].lower(),
+                                        "resolution": None}))
+        self.assertFalse(H._is_resolved({"status": "Waiting for Support",
+                                         "resolution": None}))
+        self.assertTrue(H._is_resolved({"status": "anything", "resolution": "Fixed"}))
+
+
     def test_components_are_inferred_from_the_vocabulary(self):
         with sandbox():
             build_corpus()

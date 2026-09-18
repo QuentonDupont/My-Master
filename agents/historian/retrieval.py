@@ -75,10 +75,20 @@ class Historian:
     # -- primitives --------------------------------------------------------
     @staticmethod
     def _is_resolved(doc: dict) -> bool:
+        """Settled work, usable as precedent.
+
+        PESD1 does not set a resolution on closed tickets, so the status names in
+        boards.yml `intake.resolved_statuses` are authoritative; the word hints
+        are only a fallback for boards that were never configured.
+        """
         if doc.get("resolution"):
             return True
-        status = (doc.get("status") or "").lower()
-        return any(h in status for h in RESOLVED_HINTS)
+        status = (doc.get("status") or "").strip()
+        terminal = {s.lower() for s in
+                    (config.boards()["intake"].get("resolved_statuses") or [])}
+        if status.lower() in terminal:
+            return True
+        return any(h in status.lower() for h in RESOLVED_HINTS)
 
     def duplicates(self, text: str, *, exclude_ref: str | None = None,
                    limit: int = 5, threshold: float = DUPLICATE_THRESHOLD) -> list[dict]:

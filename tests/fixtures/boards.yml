@@ -9,6 +9,9 @@ intake:
   # Status PESD1 moves to once a clone has been created.
   dev_transition: In Development
   # Statuses that mean "still open" for duplicate detection.
+  resolved_statuses:
+    - Done
+    - Closed
   open_statuses:
     - Waiting for Support
     - Waiting for Customer

@@ -5,8 +5,13 @@ intake:
   # Tickets in this status are candidates for triage.
   open_status: Waiting Support
   # Status PESD1 moves to once a clone has been created.
-  dev_transition: In Development
+  dev_transition: To Do
   # Statuses that mean "still open" for duplicate detection.
+  # Terminal statuses. PESD1 carries no resolution on closed tickets, so the
+  # Historian needs this list to know what counts as settled precedent.
+  resolved_statuses:
+    - Live
+    - Closed - Won't Do
   open_statuses:
     - Waiting Support
     - Waiting for customer
@@ -24,7 +29,7 @@ development:
   project: PRDT
   # Issue type used for every clone. Must exist in PRDT's issue-type scheme —
   # check with: python -m core.jira_client issue-types --project PRDT
-  issue_type: Task
+  issue_type: Story
   default_priority: Medium
   link_type: is cloned by
 
