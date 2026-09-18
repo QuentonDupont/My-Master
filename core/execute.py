@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from core import config, ledger as ledger_mod, log, proposals, recommendations
-from core.jira_client import JiraReadClient, JiraWriteClient
+from core.jira_client import JiraError, JiraReadClient, JiraWriteClient
 
 LOG = log.get("execute")
 
@@ -79,6 +79,31 @@ def _resolve_account_id(reader: JiraReadClient, assignee: str | None) -> str | N
     raise ExecutionRefused(
         f"assignee {assignee!r} is ambiguous ({len(matches)} matches) — fix the proposal"
     )
+
+
+def screen_fields(fields: dict, issue_type: str,
+                  reader: JiraReadClient | None = None) -> dict:
+    """Drop fields this issue type's create screen does not carry.
+
+    Required fields are per issue type: PRDT demands Department on a Story and
+    rejects it on an Epic. Sending everything to everything fails the create.
+    """
+    if not fields:
+        return {}
+    try:
+        allowed = (reader or JiraReadClient()).creatable_fields(
+            config.dev_project(), issue_type)
+    except JiraError as exc:  # pragma: no cover - network path
+        LOG.warn("execute.screen_lookup_failed", error=str(exc)[:200])
+        return fields
+    if not allowed:
+        return fields
+    kept = {k: v for k, v in fields.items() if k in allowed}
+    dropped = sorted(set(fields) - set(kept))
+    if dropped:
+        LOG.info("execute.fields_not_on_screen", issue_type=issue_type,
+                 dropped=dropped)
+    return kept
 
 
 def clone_fields(clone) -> dict:
@@ -226,7 +251,9 @@ def execute_proposal(proposal_id: str, *, execute: bool = False,
                             clone.target_project, clone.summary, clone.description,
                             issue_type=config.dev_issue_type(),
                             labels=clone.labels, priority=clone.priority,
-                            extra_fields=clone_fields(clone)),
+                            extra_fields=screen_fields(
+                                clone_fields(clone), config.dev_issue_type(),
+                                reader) if execute else clone_fields(clone)),
                         {"project": clone.target_project,
                          "issue_type": config.dev_issue_type(),
                          "summary": clone.summary[:120]},
@@ -362,6 +389,35 @@ def undo(ticket_key: str, *, execute: bool = False,
             led.close()
 
 
+def create_epic(summary: str, *, description: str = "", execute: bool = False,
+                writer: JiraWriteClient | None = None) -> dict:
+    """Create the epic that support-escalation clones hang under.
+
+    Invariant 1 keeps every TRIAGE write behind an approved proposal, and this is
+    not one: it is a one-off setup action the board owner asked for by name. It
+    lives here, in the single write module, so there is still exactly one file
+    that can write to Jira — a worker cannot reach it, and it does nothing
+    without --execute.
+    """
+    dev = config.boards()["development"]
+    project = config.dev_project()
+    writer = writer or JiraWriteClient(execute=execute)
+    fields = dict(dev.get("required_fields") or {})
+    epic_name_field = dev.get("epic_name_field")
+    if epic_name_field:
+        fields[epic_name_field] = summary
+    result = writer.create_issue(
+        project, summary,
+        description or f"Umbrella for tickets cloned from {config.intake_project()} "
+                       f"by the triage system. Each child links back to its "
+                       f"{config.intake_project()} ticket.",
+        issue_type="Epic",
+        extra_fields=screen_fields(fields, "Epic") if execute else fields)
+    LOG.info("execute.create_epic", project=project, summary=summary,
+             dry_run=not execute, key=result.get("key"))
+    return result
+
+
 def cleanup_partial(ticket_key: str, *, execute: bool = False,
                     ledger: ledger_mod.Ledger | None = None,
                     writer: JiraWriteClient | None = None,
@@ -441,6 +497,10 @@ def main(argv: list[str] | None = None) -> int:
     p_undo = sub.add_parser("undo")
     p_undo.add_argument("ticket")
     p_undo.add_argument("--execute", action="store_true")
+    p_epic = sub.add_parser("create-epic",
+                            help="create the epic clones hang under (setup, one-off)")
+    p_epic.add_argument("--summary", required=True)
+    p_epic.add_argument("--execute", action="store_true")
     p_clean = sub.add_parser("cleanup",
                              help="undo a half-finished execution so it can re-run")
     p_clean.add_argument("ticket")
@@ -450,6 +510,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "run":
             res = execute_proposal(args.proposal_id, execute=args.execute)
+        elif args.cmd == "create-epic":
+            out = create_epic(args.summary, execute=args.execute)
+            print(json.dumps(out, indent=2))
+            return 0
         elif args.cmd == "cleanup":
             res = cleanup_partial(args.ticket, execute=args.execute)
         else:

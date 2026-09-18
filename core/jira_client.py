@@ -221,6 +221,19 @@ class JiraReadClient(_Base):
                                             "description", "reporter")}
         return {}
 
+    def creatable_fields(self, project: str, issue_type: str) -> set[str]:
+        """Field ids the create screen for this issue type actually accepts."""
+        assert_project_allowed(project)
+        meta = self._request("GET", "/rest/api/2/issue/createmeta",
+                             params={"projectKeys": project,
+                                     "issuetypeNames": issue_type,
+                                     "expand": "projects.issuetypes.fields"})
+        for proj in meta.get("projects", []):
+            for it in proj.get("issuetypes", []):
+                if it.get("name") == issue_type:
+                    return set((it.get("fields") or {}).keys())
+        return set()
+
     def find_users(self, query: str, max_results: int = 10) -> list[dict]:
         return self._request("GET", "/rest/api/2/user/search",
                              params={"query": query, "maxResults": max_results})

@@ -50,10 +50,13 @@ development:
   # each component's clones belong under. `default` catches the rest; with no
   # default and no match, execution stops rather than guessing an epic.
   epic_link_field: customfield_10008
+  # PRDT Epics carry their own name field.
+  epic_name_field: customfield_10005
   epic_by_component:
     netsuite: PRDT-10732      # NetSuite Support Tickets
     api: PRDT-10842           # [API] API bugs and incidents
-  default_epic: ""
+  # PESD1 Support Escalations — created for triage-raised work.
+  default_epic: PRDT-11563
 
 # Hard allowlist. core/jira_client.py refuses any key outside this list.
 allowed_projects:
