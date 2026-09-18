@@ -11,16 +11,22 @@ FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
 
 @contextlib.contextmanager
 def fixture_boards():
-    """Point config.boards() at the fixture instance, not the live one."""
+    """Point config at the fixture instance, not the live Pomelo one.
+
+    Tuning config/boards.yml or config/repos.yml to the real Jira must never
+    break the suite.
+    """
     from core import config
 
-    data = config.load_yaml(FIXTURES / "boards.yml")
-    saved = config.boards
-    config.boards = lambda: data
+    boards = config.load_yaml(FIXTURES / "boards.yml")
+    repos = config.load_yaml(FIXTURES / "repos.yml")
+    saved_boards, saved_repos = config.boards, config.repos
+    config.boards = lambda: boards
+    config.repos = lambda: repos
     try:
-        yield data
+        yield boards
     finally:
-        config.boards = saved
+        config.boards, config.repos = saved_boards, saved_repos
 
 
 @contextlib.contextmanager

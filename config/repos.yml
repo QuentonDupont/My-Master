@@ -1,18 +1,29 @@
-# Read-only GitHub repos the Historian may mine for evidence (commits/PRs that
-# reference a ticket key). No writes, ever.
+# Components, derived from 516 real PRDT tickets (summary tags) and 405 PESD1
+# tickets. Rebuild this with:
+#   python -m agents.chief_of_staff.rules  (proposals)  or re-mine the corpus.
 org: pomelofashion
-repos:
-  - name: apollo-backend
-    components: [stock-sync, catalog, order]
-  - name: apollo-web
-    components: [checkout, pdp, cart]
-  - name: henry
-    components: [warehouse, fulfilment]
 
-# Components used to route a clone to a developer.
+# GitHub repos are UNVERIFIED placeholders — only used by `corpus.export github`,
+# which is skipped unless GITHUB_TOKEN is set. Replace with the real names before
+# turning that on.
+repos: []
+
+# Ticket text -> component. Drives clone labels and developer routing.
+# The tags on the left match how PRDT summaries are already prefixed.
 component_keywords:
-  stock-sync: [stock, inventory, oos, out of stock, sync, availability]
-  checkout: [checkout, cart, payment page, voucher, coupon]
-  catalog: [product, sku, catalog, attribute, image, category]
-  order: [order, shipment, tracking, delivery, return]
-  fulfilment: [warehouse, pick, pack, wms, henry]
+  henry: [henry, hen, warehouse, wh, shipment, factory, packing, pick, grn,
+          po, purchase order, receiving]
+  netsuite: [netsuite, ns, invoice, credit note, journal, unit cost, vendor,
+             bill, accounting, gl]
+  apollo: [apollo, storefront, price label, merchandising, catalog, catalogue,
+           sku, product, image, upload, banner]
+  api: [api, endpoint, integration, sync, syncing, webhook, feed, middleware]
+  web: [web, website, pomelofashion.com, desktop site, browser]
+  ios: [ios, iphone, app store, testflight]
+  android: [android, play store]
+  checkout: [checkout, cart, payment page, 2step, two step, voucher, coupon, promo]
+  pims: [pims, product information, attribute]
+  neon: [neon, neon-v2]
+  perks: [perks, spending, loyalty, points, tier, reward]
+  order: [order, return, refund status, tracking, delivery, shipment status,
+          roll back, revert status]

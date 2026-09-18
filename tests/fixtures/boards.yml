@@ -26,6 +26,9 @@ development:
   # Issue type used for every clone. Must exist in PRDT's issue-type scheme —
   # check with: python -m core.jira_client issue-types --project PRDT
   issue_type: Task
+  resolved_statuses:
+    - Done
+    - Closed
   default_priority: Medium
   link_type: is cloned by
 

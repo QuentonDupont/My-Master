@@ -1,0 +1,10 @@
+# Fixture vocabulary for the test suite ONLY — the live config/repos.yml is
+# tuned to Pomelo's real systems and must be free to change.
+org: fixtures
+repos: []
+component_keywords:
+  stock-sync: [stock, inventory, oos, out of stock, sync, availability]
+  checkout: [checkout, cart, payment page, voucher, coupon]
+  catalog: [product, sku, catalog, attribute, image, category]
+  order: [order, shipment, tracking, delivery, return]
+  fulfilment: [warehouse, pick, pack, wms, henry]

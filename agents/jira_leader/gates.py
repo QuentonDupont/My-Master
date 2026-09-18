@@ -22,16 +22,34 @@ VAGUE = {"broken", "again", "same", "before", "asap", "urgent", "help", "issue",
          "problem", "fix", "please", "pls", "working", "error", "wrong", "bad",
          "thing", "stuff", "something", "anything", "everything", "usual"}
 
-#: at least one of these has to appear, or we cannot say what the ticket is about
-DOMAIN_TERMS = {
-    "stock", "inventory", "sku", "product", "catalog", "catalogue", "image", "price",
-    "order", "shipment", "tracking", "delivery", "return", "refund", "payment",
-    "checkout", "cart", "voucher", "coupon", "promo", "customer", "account", "login",
-    "report", "export", "import", "sync", "warehouse", "store", "storefront", "page",
-    "pdp", "email", "campaign", "app", "site", "api", "job", "batch", "upload",
+#: an actionable signal — a request verb, a question, or a reported problem.
+#: Real PESD1 tickets carry the whole request in the summary with an empty
+#: description, so this is what "can I state the requirement?" comes down to.
+REQUEST_VERBS = {
+    "add", "remove", "update", "change", "cancel", "create", "delete", "revert",
+    "roll", "rollback", "correct", "adjust", "enable", "disable", "move", "merge",
+    "split", "upload", "download", "export", "import", "sync", "resync", "link",
+    "unlink", "assign", "reassign", "activate", "deactivate", "restore", "reopen",
+    "close", "approve", "reject", "check", "verify", "investigate", "configure",
+    "set", "reset", "increase", "decrease", "extend", "renew", "generate", "send",
 }
+PROBLEM_SIGNALS = (
+    "not working", "doesn't work", "does not work", "not showing", "not updating",
+    "incorrect", "wrong", "missing", "failed", "failing", "error", "stuck", "hang",
+    "duplicate", "cannot", "can't", "unable", "rejected", "invalid", "stale",
+    "timeout", "crash", "mismatch", "did not", "didn't", "no longer",
+    "not received", "not arrived", "has not", "hasn't", "haven't", "never received",
+)
+QUESTION_WORDS = ("how", "where", "what", "which", "who", "when", "why")
 
-MIN_CHARS = 40
+#: a polite ask counts as a request whatever verb follows it — a verb whitelist
+#: alone misses "Please process the refund again".
+REQUEST_PATTERNS = re.compile(
+    r"\b(please|pls|kindly|could you|can you|would you|we need|i need|needs? to"
+    r"|request(?:ing)? (?:to|for|that)|help (?:me |us )?(?:to )?\w+)\b", re.I)
+
+MIN_CHARS = 20
+URL_RE = re.compile(r'https?://\S+')
 
 
 def _text_of(issue: dict) -> str:
@@ -47,32 +65,43 @@ def restate(issue: dict) -> tuple[str | None, str]:
     f = issue.get("fields", {}) or {}
     summary = (f.get("summary") or "").strip()
     description = (f.get("description") or "").strip()
-    blob = f"{summary} {description}".strip()
+    # A bare link is not a requirement — the detail is inside the attachment.
+    blob = URL_RE.sub(" ", f"{summary} {description}").strip()
 
     if len(blob) < MIN_CHARS:
         return None, f"too little text to restate ({len(blob)} chars)"
 
     words = keywords(blob, 40)
-    if not words:
-        return None, "no content words"
-    domain_hits = [w for w in words if w in DOMAIN_TERMS]
-    component_vocab = {kw for words_ in
-                       (config.repos().get("component_keywords") or {}).values()
-                       for kw in words_}
-    domain_hits += [w for w in words if w in component_vocab and w not in domain_hits]
-    if not domain_hits:
-        return None, "no recognisable subject — cannot say what the request is about"
+    if len(words) < 3:
+        return None, f"only {len(words)} content words"
+
+    lower = blob.lower()
+    verbs = [w for w in words if w in REQUEST_VERBS]
+    problems = [p for p in PROBLEM_SIGNALS if p in lower]
+    asking = any(re.search(rf"\b{w}\b", lower) for w in QUESTION_WORDS) and "?" in blob
+    polite = bool(REQUEST_PATTERNS.search(lower))
+    if not (verbs or problems or asking or polite):
+        return None, ("no request and no reported problem — cannot say what is "
+                      "being asked for")
+
     vague_ratio = sum(1 for w in words if w in VAGUE) / len(words)
     if vague_ratio > 0.5:
         return None, f"mostly filler words ({vague_ratio:.0%})"
 
+    component_vocab = {kw for words_ in
+                       (config.repos().get("component_keywords") or {}).values()
+                       for kw in words_}
+    subject = [w for w in words if w in component_vocab][:4]
+
     first = re.split(r"(?<=[.!?])\s+", description)[0].strip() if description else ""
     sentence = summary if len(summary) >= 15 else (first or summary)
-    sentence = " ".join(sentence.split())[:380]
-    asking = bool(re.search(r"\b(how|where|what|which|can you|could you|who)\b",
-                            blob.lower()[:400])) and "?" in blob
+    sentence = " ".join(URL_RE.sub("", sentence).split())[:380]
     prefix = "Requester asks: " if asking else "Requester reports: "
-    return prefix + sentence, f"subject terms: {', '.join(domain_hits[:5])}"
+    why = (f"subject: {', '.join(subject)}" if subject
+           else (f"request verb: {verbs[0]}" if verbs
+                 else f"problem: {problems[0]}" if problems
+                 else "explicit request" if polite else "question"))
+    return prefix + sentence, why
 
 
 # -- gate 3: never-touch ----------------------------------------------------

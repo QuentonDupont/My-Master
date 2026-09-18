@@ -50,6 +50,12 @@ QUESTION_SIGNALS = ("how do i", "how can i", "where do i", "where can i", "where
                     "where do", "what is", "which", "can you point", "can someone tell",
                     "is there a way", "how to")
 
+#: an instruction to change something — the dominant shape of a PESD1 ticket.
+ACTION_REQUEST = re.compile(
+    r"\b(add|remove|delete|cancel|update|change|correct|create|revert|roll ?back"
+    r"|adjust|enable|disable|move|merge|split|upload|extend|renew|restore|reopen"
+    r"|assign|reassign|configure|set up|activate|deactivate|sync|resync|fix)\b", re.I)
+
 SYSTEM_PROMPT = """You triage support tickets for Pomelo Fashion's PESD1 board.
 
 You produce a PROPOSAL for a human to approve. You never take action, and nothing
@@ -86,6 +92,24 @@ class Analysis:
     analyst: str = "heuristic"
 
 
+#: requesters open with a greeting far more often than not.
+_PLEASANTRIES = re.compile(
+    r"^\s*(hi|hello|dear|hey)?[\s,]*((the\s+)?team|all|support)?[\s,]*"
+    r"(could you|can you|would you|please|pls|kindly)*[\s,]*", re.I)
+
+
+def _title(summary: str, limit: int = 110) -> str:
+    """A PRDT summary should read as a title, not as the requester's paragraph."""
+    text = " ".join(_PLEASANTRIES.sub("", (summary or "").strip()).split())
+    text = text.strip(' "\'')
+    if text:
+        text = text[0].upper() + text[1:]
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0]
+    return cut.rstrip(",;:") + "…"
+
+
 def _blob(issue: dict) -> str:
     f = issue.get("fields", {}) or {}
     return f"{f.get('summary') or ''}\n{f.get('description') or ''}"
@@ -107,6 +131,9 @@ class HeuristicAnalyst:
         text = _blob(issue).lower()
         failures = [s for s in FAILURE_SIGNALS if s in text]
         question = (any(q in text for q in QUESTION_SIGNALS) and "?" in text)
+        # "Please add X", "Cancel Y", "Update Z" — an instruction to change
+        # something, which someone has to do. Not a question to answer.
+        action = bool(ACTION_REQUEST.search(text))
 
         sops = retrieval.sops
         similar = retrieval.similar_resolved
@@ -117,13 +144,19 @@ class HeuristicAnalyst:
         if failures and not question:
             classification = "NEEDS_CODE"
             base = 0.55
-        elif question and not failures:
+        elif question and not failures and not action:
             classification = "ANSWERABLE"
             base = 0.5
         elif question and failures:
             classification = "NEEDS_CODE" if best_sim < 0.7 else "ANSWERABLE"
             base = 0.45
             flags.append("mixed_signals")
+        elif action:
+            # An explicit ask to change something. It is only ANSWERABLE if an
+            # SOP genuinely covers it end to end; otherwise someone has to act.
+            covered = bool(sops) and best_sim >= 0.7
+            classification = "ANSWERABLE" if covered else "NEEDS_CODE"
+            base = 0.55 if covered else 0.5
         else:
             classification = "ANSWERABLE" if best_sim >= 0.6 else "NEEDS_CODE"
             base = 0.4
@@ -151,7 +184,7 @@ class HeuristicAnalyst:
 
         component = (retrieval.components or ["triage"])[0]
         summary = (issue.get("fields", {}) or {}).get("summary") or ""
-        clone_summary = f"[{component}] {summary}".strip()[:240]
+        clone_summary = f"[{component}] {_title(summary)}"
         developer_summary = self._developer_summary(retrieval, failures, component)
 
         labels = list((issue.get("fields", {}) or {}).get("labels") or [])

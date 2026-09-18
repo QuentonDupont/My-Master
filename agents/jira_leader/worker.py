@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from dataclasses import dataclass
 
 from agents.historian.retrieval import Historian
@@ -32,6 +33,26 @@ class Outcome:
     def to_dict(self) -> dict:
         return {"ticket": self.ticket, "state": self.state,
                 "proposal_id": self.proposal_id, "reason": self.reason}
+
+
+URL_ONLY_RE = re.compile(r"^\s*(https?://\S+\s*)+$")
+
+
+def unreadable_detail(issue: dict) -> str | None:
+    """Is the actual request inside something we cannot read?
+
+    Most PESD1 tickets carry the request in the summary; some carry it only in a
+    Drive link or an attachment. The human has to be told when that is the case,
+    rather than shown a confident proposal written from a title.
+    """
+    fields = issue.get("fields", {}) or {}
+    description = (fields.get("description") or "").strip()
+    attachments = fields.get("attachment") or []
+    if description and URL_ONLY_RE.match(description):
+        return "description is only a link — the detail is not readable"
+    if attachments and not description:
+        return f"{len(attachments)} attachment(s) and no description"
+    return None
 
 
 def _new_proposal(issue: dict, **kw) -> proposals.Proposal:
@@ -123,6 +144,13 @@ def process(issue: dict, *, ledger: ledger_mod.Ledger | None = None,
 
         evidence = [proposals.Evidence(**e) for e in research.evidence()]
         flags = list(dict.fromkeys(list(analysis.flags) + list(requester.flags)))
+        unreadable = unreadable_detail(issue)
+        if unreadable:
+            flags.append("detail_in_attachment")
+            # We drafted from the summary alone; say so in the confidence.
+            analysis.confidence = round(min(analysis.confidence, 0.45), 2)
+            if "low_confidence" not in flags:
+                flags.append("low_confidence")
 
         clone = None
         transition = None

@@ -28,6 +28,8 @@ DUPLICATE_THRESHOLD = 0.62
 MIN_RELEVANCE = 0.25
 #: closed/resolved-ish statuses. Anything not here counts as open.
 RESOLVED_HINTS = ("done", "closed", "resolved", "complete", "cancelled", "declined")
+#: PRDT summaries start with a component tag: "[HEN] ...", "[NET] ...".
+TAG_RE = re.compile(r"^\s*[\[(]([^\])]{2,20})[\])]")
 
 
 @dataclass
@@ -46,11 +48,11 @@ class Retrieval:
             out.append({"type": "sop", "ref": doc["ref"],
                         "why": f"approved SOP, {doc['similarity']:.0%} match on the symptom"})
         for doc in self.similar_resolved:
-            who = doc.get("assignee") or "unknown"
+            who = doc.get("assignee") or "unassigned"
             res = doc.get("resolution") or doc.get("status") or "resolved"
             out.append({"type": "jira", "ref": doc["ref"],
-                        "why": f"same symptom, {res.lower()} by {who} "
-                               f"({doc['similarity']:.0%} match)"})
+                        "why": f"same symptom, closed as {res} by {who} "
+                               f"({doc['similarity']:.0%} term overlap)"})
         for doc in self.github:
             out.append({"type": "github", "ref": doc["ref"],
                         "why": f"code change referencing {doc['title'][:60]}"})
@@ -154,33 +156,79 @@ class Historian:
         comps = list(components or []) or self.components_for(text)
         comps += [l for l in (labels or []) if l not in comps]
         dev = config.dev_project()
+        # Finished work only — and this board marks most of it with a status
+        # rather than a resolution, so the status list is load-bearing.
+        terminal = [s.lower() for s in
+                    (config.boards()["development"].get("resolved_statuses")
+                     or ["done", "closed", "resolved"])]
+        marks = ",".join("?" * len(terminal))
         rows = self.corpus.conn.execute(
-            """SELECT assignee, components, labels, title, updated, resolution
-               FROM documents
-               WHERE source_type = 'jira' AND project = ? AND assignee IS NOT NULL
-                     AND assignee != '' AND (resolution IS NOT NULL OR lower(status) IN
-                         ('done','closed','resolved'))
-               ORDER BY updated DESC LIMIT 400""",
-            (dev,),
+            f"""SELECT assignee, components, labels, title, updated, resolution
+                FROM documents
+                WHERE source_type = 'jira' AND project = ? AND assignee IS NOT NULL
+                      AND assignee != ''
+                      AND (resolution IS NOT NULL OR lower(status) IN ({marks}))
+                ORDER BY updated DESC LIMIT 400""",
+            (dev, *terminal),
         ).fetchall()
 
+        keyword_map = config.repos().get("component_keywords") or {}
+
+        def tag_of(title: str) -> str | None:
+            m = TAG_RE.match(title or "")
+            return m.group(1).strip().lower() if m else None
+
+        def tag_matches(tag: str | None, comp: str) -> bool:
+            """PRDT prefixes its summaries: [HEN], [NET], [Apollo], [2Step]."""
+            if not tag:
+                return False
+            comp = comp.lower()
+            if tag == comp or tag in keyword_map.get(comp, []):
+                return True
+            return len(tag) >= 3 and (tag in comp or comp in tag)
+
         def matches(row) -> str | None:
-            haystack = f"{row['components']} {row['labels']} {row['title']}".lower()
+            title = row["title"] or ""
+            tag = tag_of(title)
+            for comp in comps:
+                if comp and tag_matches(tag, comp):
+                    return comp
+            haystack = f"{row['components']} {row['labels']} {title}".lower()
             for comp in comps:
                 if comp and comp.lower() in haystack:
                     return comp
             return None
 
-        matched = [(r, c) for r in rows if (c := matches(r))]
-        pool = matched[:max(window * 4, 40)] if matched else list(rows)[:window * 4]
+        # The tag convention is the strongest routing signal in this instance, so
+        # prefer tagged matches and only fall back to body text when there are none.
+        # Rank within ONE component. Merging every candidate component into a
+        # single pool lets the busiest team win tickets that belong to another.
+        matched: list = []
+        for comp in comps:
+            tagged = [(r, comp) for r in rows if tag_matches(tag_of(r["title"]), comp)]
+            if tagged:
+                matched = tagged
+                break
+        if not matched:
+            for comp in comps:
+                hits = [(r, comp) for r in rows
+                        if comp.lower() in
+                        f"{r['components']} {r['labels']} {r['title']}".lower()]
+                if hits:
+                    matched = hits
+                    break
+        # Count over exactly what was matched, so the denominator in the reason
+        # is the number of tickets actually considered.
+        fallback = not matched
+        pool = matched or [(r, None) for r in rows[: window * 4]]
         counts: dict[str, int] = {}
         why: dict[str, str] = {}
-        for row, comp in (matched or [(r, None) for r in rows[:window * 4]]):
+        for row, comp in pool:
             name = row["assignee"]
             counts[name] = counts.get(name, 0) + 1
-            why.setdefault(name, comp or "recent PRDT work")
-
-        total = len(pool) or 1
+            why.setdefault(name, comp)
+        total = len(pool)
+        matched_component = pool[0][1] if pool else None
         ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
 
         # Backfill so the human always gets a shortlist, never a single name.
@@ -194,18 +242,31 @@ class Historian:
                 if name in counts:
                     continue
                 counts[name] = count
-                why[name] = "recent PRDT work"
+                why[name] = None
                 ranked.append((name, count))
+
+        # Say so when the ticket's own component has no history and we ranked on
+        # the next one — otherwise the clone label and the reason disagree
+        # silently.
+        primary = comps[0] if comps else None
+        aside = ""
+        if matched_component and primary and matched_component != primary:
+            aside = (f" (no {dev} history tagged {primary}, ranked on "
+                     f"{matched_component})")
 
         out = []
         for name, count in ranked:
-            comp = why[name]
-            reason = (f"closed {count} of the last {total} {dev} tickets with "
-                      f"component={comp}" if comp != "recent PRDT work"
-                      else f"closed {count} of the last {len(rows[: window * 4])} "
-                           f"{dev} tickets overall (no {dev} history on this component)")
+            comp = why.get(name)
+            if comp:
+                reason = (f"closed {count} of the last {total} {dev} tickets with "
+                          f"component={comp}{aside}")
+            else:
+                reason = (f"closed {count} of the last {len(rows[: window * 4])} "
+                          f"{dev} tickets overall (no {dev} history on this component)")
             out.append({"assignee": name, "count": count, "reason": reason,
-                        "component": comp})
+                        "component": comp or "recent PRDT work"})
+        if fallback:
+            LOG.warn("historian.assignee_fallback", components=comps)
         LOG.info("historian.assignees", candidates=[o["assignee"] for o in out],
                  components=comps)
         return out

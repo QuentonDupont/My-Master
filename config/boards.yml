@@ -30,6 +30,11 @@ development:
   # Issue type used for every clone. Must exist in PRDT's issue-type scheme —
   # check with: python -m core.jira_client issue-types --project PRDT
   issue_type: Story
+  # Terminal statuses on PRDT — 162 of its tickets sit in "Live" with no
+  # resolution set, and developer routing has to count them as finished work.
+  resolved_statuses:
+    - Live
+    - Closed - Won't Do
   default_priority: Medium
   link_type: is cloned by
 
