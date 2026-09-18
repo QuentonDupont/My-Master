@@ -4,6 +4,10 @@ This file is loaded automatically at the start of every Claude Code session in t
 repo. Read it fully before doing anything. If a request in a session conflicts with
 the invariants below, stop and ask.
 
+**Read `HANDOFF.md` too** — this file is the specification, that one is the state
+of play: what is live in Jira, what is waiting on the board owner, and what was
+agreed next.
+
 ---
 
 ## What this system is
