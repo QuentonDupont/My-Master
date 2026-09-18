@@ -1,0 +1,297 @@
+"""SQLite FTS5 corpus — the Historian's substrate.
+
+One `documents` row per retrievable thing: a Jira ticket, a Confluence page, an
+approved SOP, a GitHub commit/PR. Ranking is BM25, re-weighted by source so the
+SOP library outranks raw ticket history (CLAUDE.md, learning loop).
+
+    python -m corpus.index build          # (re)build from corpus/raw/*.jsonl
+    python -m corpus.index search "text"  # sanity-check retrieval
+    python -m corpus.index stats
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sqlite3
+from pathlib import Path
+from typing import Iterable
+
+from core import config, log
+
+LOG = log.get("corpus")
+
+RAW_DIR = config.CORPUS_DIR / "raw"
+
+#: source weight — SOPs outrank Confluence, which outranks raw tickets.
+SOURCE_WEIGHT = {"sop": 2.0, "confluence": 1.4, "jira": 1.0, "github": 0.8}
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS documents (
+  doc_id       TEXT PRIMARY KEY,
+  source_type  TEXT NOT NULL,      -- jira | confluence | sop | github
+  ref          TEXT NOT NULL,      -- ticket key, page id, sha, pr number
+  project      TEXT,
+  status       TEXT,
+  resolution   TEXT,
+  created      TEXT,
+  updated      TEXT,
+  reporter     TEXT,
+  assignee     TEXT,
+  labels       TEXT,               -- json list
+  components   TEXT,               -- json list
+  title        TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  url          TEXT
+);
+CREATE INDEX IF NOT EXISTS documents_type_idx ON documents(source_type);
+CREATE INDEX IF NOT EXISTS documents_status_idx ON documents(status);
+CREATE INDEX IF NOT EXISTS documents_ref_idx ON documents(ref);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
+  title, body, doc_id UNINDEXED, tokenize='porter unicode61'
+);
+"""
+
+STOPWORDS = {
+    "the", "a", "an", "and", "or", "but", "if", "of", "to", "in", "on", "for", "with",
+    "is", "are", "was", "were", "be", "been", "it", "this", "that", "these", "those",
+    "as", "at", "by", "from", "we", "i", "you", "he", "she", "they", "please", "hi",
+    "hello", "dear", "team", "thanks", "thank", "regards", "kindly", "can", "could",
+    "would", "should", "not", "no", "yes", "has", "have", "had", "do", "does", "did",
+    "there", "here", "when", "what", "which", "who", "how", "why", "our", "your",
+}
+TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_\-]{1,}")
+
+
+def keywords(text: str, limit: int = 18) -> list[str]:
+    """Content words, most frequent first — used to build the FTS query."""
+    counts: dict[str, int] = {}
+    for tok in TOKEN_RE.findall(text or ""):
+        t = tok.lower()
+        if t in STOPWORDS or len(t) < 3:
+            continue
+        counts[t] = counts.get(t, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [t for t, _ in ranked[:limit]]
+
+
+def fts_query(text: str, limit: int = 18) -> str:
+    """A safe FTS5 OR-query. Never pass user text to FTS5 unquoted."""
+    terms = keywords(text, limit)
+    return " OR ".join(f'"{t}"' for t in terms)
+
+
+class Corpus:
+    def __init__(self, path: Path | str | None = None) -> None:
+        self.path = Path(path or config.CORPUS_DB)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(self.path, isolation_level=None, timeout=30)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript(SCHEMA)
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def __enter__(self) -> "Corpus":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    # -- writing -----------------------------------------------------------
+    def add(self, doc: dict) -> None:
+        doc_id = doc["doc_id"]
+        self.conn.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
+        self.conn.execute("DELETE FROM docs_fts WHERE doc_id = ?", (doc_id,))
+        self.conn.execute(
+            """INSERT INTO documents (doc_id, source_type, ref, project, status,
+                 resolution, created, updated, reporter, assignee, labels, components,
+                 title, body, url)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (doc_id, doc["source_type"], doc["ref"], doc.get("project"),
+             doc.get("status"), doc.get("resolution"), doc.get("created"),
+             doc.get("updated"), doc.get("reporter"), doc.get("assignee"),
+             json.dumps(doc.get("labels") or []), json.dumps(doc.get("components") or []),
+             doc.get("title") or "", doc.get("body") or "", doc.get("url")),
+        )
+        self.conn.execute(
+            "INSERT INTO docs_fts (title, body, doc_id) VALUES (?,?,?)",
+            (doc.get("title") or "", doc.get("body") or "", doc_id),
+        )
+
+    def add_many(self, docs: Iterable[dict]) -> int:
+        n = 0
+        self.conn.execute("BEGIN")
+        try:
+            for doc in docs:
+                self.add(doc)
+                n += 1
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+        self.conn.execute("COMMIT")
+        return n
+
+    def clear(self) -> None:
+        self.conn.executescript("DELETE FROM documents; DELETE FROM docs_fts;")
+
+    # -- reading -----------------------------------------------------------
+    def get(self, doc_id: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM documents WHERE doc_id = ?",
+                                (doc_id,)).fetchone()
+        return _row_to_doc(row) if row else None
+
+    def by_ref(self, ref: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM documents WHERE ref = ? LIMIT 1",
+                                (ref,)).fetchone()
+        return _row_to_doc(row) if row else None
+
+    def search(self, text: str, *, limit: int = 10, source_types: tuple[str, ...] | None = None,
+               project: str | None = None, statuses: tuple[str, ...] | None = None,
+               exclude_refs: tuple[str, ...] = ()) -> list[dict]:
+        query = fts_query(text)
+        if not query:
+            return []
+        sql = ["""SELECT d.*, bm25(docs_fts) AS bm25
+                  FROM docs_fts JOIN documents d ON d.doc_id = docs_fts.doc_id
+                  WHERE docs_fts MATCH ?"""]
+        params: list = [query]
+        if source_types:
+            sql.append(f"AND d.source_type IN ({','.join('?' * len(source_types))})")
+            params += list(source_types)
+        if project:
+            sql.append("AND d.project = ?")
+            params.append(project)
+        if statuses:
+            sql.append(f"AND d.status IN ({','.join('?' * len(statuses))})")
+            params += list(statuses)
+        if exclude_refs:
+            sql.append(f"AND d.ref NOT IN ({','.join('?' * len(exclude_refs))})")
+            params += list(exclude_refs)
+        sql.append("ORDER BY bm25 LIMIT ?")
+        params.append(max(limit * 4, 40))
+        rows = self.conn.execute(" ".join(sql), params).fetchall()
+
+        query_terms = set(keywords(text, 18))
+        scored = []
+        for row in rows:
+            doc = _row_to_doc(row)
+            raw = -float(row["bm25"])  # bm25(): lower is better
+            doc["score"] = round(raw * SOURCE_WEIGHT.get(doc["source_type"], 1.0), 4)
+            # Similarity is ABSOLUTE — the share of the query's signal terms this
+            # document actually contains. Never normalise against the best hit in
+            # the result set: with one weak hit that would score it 1.0.
+            doc_terms = set(keywords(f"{doc['title']} {doc['body']}", 400))
+            doc["similarity"] = (round(len(query_terms & doc_terms) / len(query_terms), 3)
+                                 if query_terms else 0.0)
+            scored.append(doc)
+        scored.sort(key=lambda d: (-d["similarity"], -d["score"]))
+        return scored[:limit]
+
+    def stats(self) -> dict:
+        rows = self.conn.execute(
+            "SELECT source_type, COUNT(*) c FROM documents GROUP BY source_type")
+        out = {r["source_type"]: r["c"] for r in rows}
+        out["total"] = sum(out.values())
+        return out
+
+
+def _row_to_doc(row: sqlite3.Row) -> dict:
+    doc = dict(row)
+    doc["labels"] = json.loads(doc.get("labels") or "[]")
+    doc["components"] = json.loads(doc.get("components") or "[]")
+    return doc
+
+
+# -- document builders ------------------------------------------------------
+def doc_from_jira(issue: dict) -> dict:
+    f = issue.get("fields", {}) or {}
+    comments = [c.get("body") or "" for c in
+                (f.get("comment", {}) or {}).get("comments", [])] or issue.get("_comments", [])
+    body_parts = [f.get("description") or ""]
+    body_parts += [c if isinstance(c, str) else (c.get("body") or "") for c in comments]
+    return {
+        "doc_id": f"jira:{issue['key']}",
+        "source_type": "jira",
+        "ref": issue["key"],
+        "project": issue["key"].split("-")[0],
+        "status": ((f.get("status") or {}).get("name")),
+        "resolution": ((f.get("resolution") or {}) or {}).get("name"),
+        "created": f.get("created"),
+        "updated": f.get("updated"),
+        "reporter": ((f.get("reporter") or {}) or {}).get("displayName"),
+        "assignee": ((f.get("assignee") or {}) or {}).get("displayName"),
+        "labels": f.get("labels") or [],
+        "components": [c.get("name") for c in (f.get("components") or [])],
+        "title": f.get("summary") or "",
+        "body": "\n\n".join(p for p in body_parts if p),
+        "url": config.ticket_url(issue["key"]),
+    }
+
+
+def doc_from_markdown(path: Path, source_type: str = "sop") -> dict:
+    text = path.read_text(encoding="utf-8")
+    first = next((ln for ln in text.splitlines() if ln.strip()), path.stem)
+    return {
+        "doc_id": f"{source_type}:{path.stem}",
+        "source_type": source_type,
+        "ref": path.stem,
+        "title": first.lstrip("# ").strip(),
+        "body": text,
+        "url": str(path),
+    }
+
+
+def build(clear: bool = True) -> dict:
+    """(Re)build the index from corpus/raw/*.jsonl plus knowledge/sops/*.md."""
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    docs: list[dict] = []
+    for path in sorted(RAW_DIR.glob("*.jsonl")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            docs.append(doc_from_jira(record) if "fields" in record else record)
+    sop_dir = config.KNOWLEDGE_DIR / "sops"
+    if sop_dir.exists():
+        docs += [doc_from_markdown(p) for p in sorted(sop_dir.glob("*.md"))]
+
+    with Corpus() as corpus:
+        if clear:
+            corpus.clear()
+        n = corpus.add_many(docs)
+        stats = corpus.stats()
+    LOG.info("corpus.built", documents=n, **stats)
+    return stats
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="python -m corpus.index")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p_b = sub.add_parser("build")
+    p_b.add_argument("--keep", action="store_true", help="do not clear existing docs")
+    p_s = sub.add_parser("search")
+    p_s.add_argument("text")
+    p_s.add_argument("--limit", type=int, default=10)
+    p_s.add_argument("--type", dest="types", action="append", default=[])
+    sub.add_parser("stats")
+    args = ap.parse_args(argv)
+
+    if args.cmd == "build":
+        print(json.dumps(build(clear=not args.keep), indent=2))
+    elif args.cmd == "stats":
+        with Corpus() as c:
+            print(json.dumps(c.stats(), indent=2))
+    else:
+        with Corpus() as c:
+            for doc in c.search(args.text, limit=args.limit,
+                                source_types=tuple(args.types) or None):
+                print(f"{doc['similarity']:.3f}  {doc['source_type']:<10} "
+                      f"{doc['ref']:<14} {doc['title'][:70]}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

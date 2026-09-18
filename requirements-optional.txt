@@ -1,0 +1,9 @@
+# The system runs on the Python 3.11+ standard library alone. Nothing here is
+# needed for triage, review, execution, or the tests.
+#
+# Install only if you want the Claude analyst instead of the heuristic one
+# (agents/jira_leader/analysis.py) — then set ANTHROPIC_API_KEY in .env.
+anthropic>=1.0.0
+
+# Optional: use PyYAML instead of the bundled config/*.yml subset parser.
+# PyYAML>=6.0

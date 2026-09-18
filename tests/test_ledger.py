@@ -1,0 +1,91 @@
+import unittest
+
+from tests.helpers import sandbox
+
+
+class LedgerTests(unittest.TestCase):
+    def test_state_machine_refuses_illegal_moves(self):
+        from core import ledger as L
+        with sandbox():
+            with L.Ledger() as led:
+                led.upsert_new("PESD1-1", "h1")
+                with self.assertRaises(L.LedgerError):
+                    led.transition("PESD1-1", L.EXECUTED)      # NEW -> EXECUTED
+                led.claim("PESD1-1", "h1")
+                led.transition("PESD1-1", L.PROPOSED, proposal_id="p_0001")
+                with self.assertRaises(L.LedgerError):
+                    led.transition("PESD1-1", L.EXECUTED)      # must be approved first
+                led.transition("PESD1-1", L.APPROVED)
+                led.transition("PESD1-1", L.EXECUTED, clone_key="PRDT-1")
+                self.assertTrue(led.is_executed("PESD1-1"))
+
+    def test_executed_is_terminal_except_rollback(self):
+        from core import ledger as L
+        with sandbox():
+            with L.Ledger() as led:
+                led.upsert_new("PESD1-2", "h")
+                led.claim("PESD1-2", "h")
+                led.transition("PESD1-2", L.PROPOSED)
+                led.transition("PESD1-2", L.APPROVED)
+                led.transition("PESD1-2", L.EXECUTED)
+                for state in (L.EXECUTED, L.APPROVED, L.PROPOSED, L.CLAIMED):
+                    with self.assertRaises(L.LedgerError):
+                        led.transition("PESD1-2", state)
+                led.transition("PESD1-2", L.ROLLED_BACK)
+
+    def test_reprocessing_gate(self):
+        """Invariant 4: only a changed hash AND the open status re-opens a ticket."""
+        from core import config, ledger as L
+        open_status = config.boards()["intake"]["open_status"]
+        with sandbox():
+            with L.Ledger() as led:
+                self.assertTrue(led.should_process("PESD1-3", "h1", open_status)[0])
+                led.claim("PESD1-3", "h1")
+                led.transition("PESD1-3", L.PROPOSED)
+                led.transition("PESD1-3", L.APPROVED)
+                led.transition("PESD1-3", L.EXECUTED)
+
+                self.assertFalse(led.should_process("PESD1-3", "h1", open_status)[0])
+                self.assertFalse(led.should_process("PESD1-3", "h2", "In Development")[0])
+                ok, reason = led.should_process("PESD1-3", "h2", open_status)
+                self.assertTrue(ok, reason)
+
+    def test_in_flight_tickets_are_not_reclaimed(self):
+        from core import config, ledger as L
+        open_status = config.boards()["intake"]["open_status"]
+        with sandbox():
+            with L.Ledger() as led:
+                led.claim("PESD1-4", "h1")
+                self.assertFalse(led.should_process("PESD1-4", "h2", open_status)[0])
+                self.assertFalse(led.claim("PESD1-4", "h2"))
+
+    def test_released_ticket_is_retried(self):
+        """A worker that crashes releases the ticket; it must come back round."""
+        from core import config, ledger as L
+        open_status = config.boards()["intake"]["open_status"]
+        with sandbox():
+            with L.Ledger() as led:
+                led.claim("PESD1-6", "h1")
+                led.transition("PESD1-6", L.NEW, last_error="worker: boom")
+                ok, reason = led.should_process("PESD1-6", "h1", open_status)
+                self.assertTrue(ok, reason)
+                self.assertTrue(led.claim("PESD1-6", "h1"))
+
+    def test_content_hash_tracks_comment_count(self):
+        from core.ledger import content_hash
+        a = content_hash("s", "d", 1)
+        self.assertEqual(a, content_hash("s", "d", 1))
+        self.assertNotEqual(a, content_hash("s", "d", 2))
+        self.assertNotEqual(a, content_hash("s", "d2", 1))
+
+    def test_transition_rejects_unknown_fields(self):
+        from core import ledger as L
+        with sandbox():
+            with L.Ledger() as led:
+                led.upsert_new("PESD1-5", "h")
+                with self.assertRaises(L.LedgerError):
+                    led.transition("PESD1-5", L.CLAIMED, state="EXECUTED")
+
+
+if __name__ == "__main__":
+    unittest.main()

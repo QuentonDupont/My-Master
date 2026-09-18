@@ -1,0 +1,18 @@
+# Read-only GitHub repos the Historian may mine for evidence (commits/PRs that
+# reference a ticket key). No writes, ever.
+org: pomelofashion
+repos:
+  - name: apollo-backend
+    components: [stock-sync, catalog, order]
+  - name: apollo-web
+    components: [checkout, pdp, cart]
+  - name: henry
+    components: [warehouse, fulfilment]
+
+# Components used to route a clone to a developer.
+component_keywords:
+  stock-sync: [stock, inventory, oos, out of stock, sync, availability]
+  checkout: [checkout, cart, payment page, voucher, coupon]
+  catalog: [product, sku, catalog, attribute, image, category]
+  order: [order, shipment, tracking, delivery, return]
+  fulfilment: [warehouse, pick, pack, wms, henry]

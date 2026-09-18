@@ -1,0 +1,27 @@
+# Never-touch categories. A match escalates to the human with NO comment and NO
+# clone, regardless of confidence. Matching is case-insensitive on
+# summary + description + labels + components.
+categories:
+  refunds:
+    keywords: [refund, refunded, chargeback, money back, reimburse, credit note]
+  payments:
+    keywords: [payment, payment gateway, 2c2p, omise, stripe, paypal, cod amount,
+               settlement, transaction failed, double charge, charged twice]
+  pricing:
+    keywords: [price, pricing, discount amount, markdown price, promo value,
+               voucher value, change the price, wrong price]
+  customer_pii:
+    keywords: [pii, personal data, id card, passport, national id, customer address,
+               phone number of customer, gdpr, pdpa, data deletion request]
+  stock_adjustments:
+    keywords: [stock adjustment, adjust stock, adjust inventory, manual stock,
+               increase stock, decrease stock, write off inventory]
+  account_access:
+    keywords: [reset password, grant access, remove access, permission, admin rights,
+               role change, sso, deactivate account, unlock account]
+
+# Regexes get the same treatment as keywords.
+regexes:
+  - '\b(refund|chargeback)\w*\b'
+  - '\bcredit\s+card\b'
+  - '\b\d{13,19}\b'   # card-number-shaped digit runs
