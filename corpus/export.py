@@ -40,6 +40,53 @@ def export_jira(project: str, months: int = 18, limit: int | None = None) -> int
     return len(issues)
 
 
+def export_confluence(space_key: str | None = None,
+                      limit: int | None = None) -> int:
+    """Export Confluence pages as corpus documents. Read-only."""
+    from core.confluence_client import ConfluenceReadClient, to_text
+
+    client = ConfluenceReadClient()
+    wanted = ([{"key": space_key, "limit": limit}] if space_key
+              else (config.confluence().get("spaces") or []))
+    RAW.mkdir(parents=True, exist_ok=True)
+    total = 0
+    for spec in wanted:
+        key = spec["key"]
+        space = client.space(key)
+        if not space:
+            LOG.warn("confluence.space_missing", space=key)
+            continue
+        cap = limit or spec.get("limit") or 200
+        pages = client.pages(space["id"], limit=cap)
+        out = RAW / f"confluence_{key.lower()}.jsonl"
+        written = 0
+        with out.open("w", encoding="utf-8") as fh:
+            for page in pages:
+                try:
+                    full = client.page_body(page["id"])
+                except Exception as exc:  # a single unreadable page is not fatal
+                    LOG.warn("confluence.page_failed", page=page["id"],
+                             error=str(exc)[:120])
+                    continue
+                body = ((full.get("body") or {}).get("storage") or {}).get("value", "")
+                text = to_text(body)
+                if len(text) < 40:
+                    continue  # a stub page is noise in retrieval
+                fh.write(json.dumps({
+                    "doc_id": f"confluence:{page['id']}",
+                    "source_type": "confluence",
+                    "ref": f"{key}/{page['title'][:60]}",
+                    "title": page["title"],
+                    "body": text,
+                    "url": client.page_url(full),
+                    "updated": ((full.get("version") or {}).get("createdAt")),
+                }, ensure_ascii=False) + "\n")
+                written += 1
+        LOG.info("export.confluence", space=key, pages=written, path=str(out))
+        total += written
+    return total
+
+
 def _github_search(path: str, query: str, token: str) -> list[dict]:
     url = f"https://api.github.com{path}?" + urllib.parse.urlencode(
         {"q": query, "per_page": 30})
@@ -99,6 +146,9 @@ def main(argv: list[str] | None = None) -> int:
     p_j.add_argument("--project", default=config.intake_project())
     p_j.add_argument("--months", type=int, default=18)
     p_j.add_argument("--limit", type=int)
+    p_c = sub.add_parser("confluence")
+    p_c.add_argument("--space")
+    p_c.add_argument("--limit", type=int)
     p_g = sub.add_parser("github")
     p_g.add_argument("--keys", nargs="+", required=True)
     p_a = sub.add_parser("all")
@@ -107,10 +157,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "jira":
         print(export_jira(args.project, args.months, args.limit))
+    elif args.cmd == "confluence":
+        print(export_confluence(args.space, args.limit))
     elif args.cmd == "github":
         print(export_github(args.keys))
     else:
         total = sum(export_jira(p, args.months) for p in config.allowed_projects())
+        total += export_confluence()
         print(total)
     return 0
 

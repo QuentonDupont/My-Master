@@ -84,6 +84,12 @@ def never_touch() -> dict:
 
 
 @lru_cache(maxsize=None)
+def confluence() -> dict:
+    path = CONFIG_DIR / "confluence.yml"
+    return load_yaml(path) if path.exists() else {"spaces": []}
+
+
+@lru_cache(maxsize=None)
 def repos() -> dict:
     return load_yaml(CONFIG_DIR / "repos.yml")
 

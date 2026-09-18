@@ -244,9 +244,11 @@ def build(issue: dict, retrieval, analysis, requester=None) -> str:
     # -- where to start ----------------------------------------------------
     out += ["h2. Where to start", ""]
     started = False
-    if retrieval.sops:
-        sop = retrieval.sops[0]
-        out += [f"* Follow the SOP _{sop['title']}_ — it covers this symptom.", ""]
+    for sop in retrieval.sops[:2]:
+        link = sop.get("url") or ""
+        where = "the SOP" if sop.get("source_type") == "sop" else "the written procedure"
+        title = f"[{sop['title']}|{link}]" if link.startswith("http") else sop["title"]
+        out += [f"* Read {where} {title} — it covers this kind of request.", ""]
         started = True
     if history:
         # The nearest ticket by wording is not always the one that says what was

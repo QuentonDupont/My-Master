@@ -1,0 +1,18 @@
+# Confluence spaces the Historian indexes. Read-only: there is no write path to
+# Confluence anywhere in this system, by design — an approved SOP is published
+# by a human.
+#
+# Weighted above raw ticket history (corpus/index.py: SOURCE_WEIGHT), because a
+# written procedure beats inferring one from how a ticket happened to be closed.
+spaces:
+  - key: PM
+    name: Product Management
+    # Pages per space. Raise it when the corpus proves useful; each page is one
+    # extra API call to fetch its body.
+    limit: 400
+
+# Candidates not indexed yet — add them when you want them in scope:
+#   PSD  Pomelo Service Desk
+#   DO   DevOps
+#   PRA  Pomelo Retail API
+#   POMQ PomQ

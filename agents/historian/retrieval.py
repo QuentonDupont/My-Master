@@ -64,8 +64,12 @@ class Retrieval:
                         + (f", already cloned to {clones}" if clones else "")
                         + f" ({doc['similarity']:.0%} overlap)")})
         for doc in self.sops:
-            out.append({"type": "sop", "ref": doc["ref"],
-                        "why": f"approved SOP, {doc['similarity']:.0%} match on the symptom"})
+            kind = "sop" if doc.get("source_type") == "sop" else "confluence"
+            where = "approved SOP" if kind == "sop" else "Confluence page"
+            link = f" — {doc['url']}" if str(doc.get("url", "")).startswith("http") else ""
+            out.append({"type": kind, "ref": doc["ref"],
+                        "why": f"{where}, {doc['similarity']:.0%} match on the "
+                               f"request{link}"})
         for doc in self.similar_resolved:
             who = doc.get("assignee") or "unassigned"
             res = doc.get("resolution") or doc.get("status") or "resolved"

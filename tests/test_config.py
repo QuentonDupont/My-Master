@@ -22,6 +22,19 @@ class ConfigTests(unittest.TestCase):
                       "boards.yml must say which issue type clones are created as")
         self.assertTrue(development["issue_type"])
 
+    def test_plural_folding(self):
+        from corpus.index import singular
+        self.assertEqual(singular("locations"), "location")
+        self.assertEqual(singular("categories"), "category")
+        self.assertEqual(singular("addresses"), "address")
+        for unchanged in ("status", "analysis", "bonus", "po", "ns"):
+            self.assertEqual(singular(unchanged), unchanged)
+
+    def test_confluence_spaces_are_configured(self):
+        spaces = config.confluence().get("spaces") or []
+        self.assertTrue(spaces, "config/confluence.yml must list at least one space")
+        self.assertTrue(all("key" in s for s in spaces))
+
     def test_miniyaml_subset(self):
         parsed = miniyaml.loads("""
 a: 1

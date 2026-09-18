@@ -78,6 +78,35 @@ class HistorianTests(unittest.TestCase):
                 self.assertTrue(doc.get("resolution") or
                                 doc["status"].lower() in ("done", "closed", "resolved"))
 
+    def test_a_sprawling_page_does_not_match_everything(self):
+        """A 3000-word notes page contains a bit of every subject; without
+        length damping it floats to the top of every search."""
+        from corpus.index import Corpus
+        with sandbox():
+            build_corpus()
+            with Corpus() as corpus:
+                corpus.add_many([
+                    {"doc_id": "confluence:1", "source_type": "confluence",
+                     "ref": "PM/Daily Notes", "title": "2019 - PM Daily Notes",
+                     "body": " ".join(["stock order invoice checkout image sync "
+                                       "warehouse voucher catalogue shipment"] * 120)},
+                    {"doc_id": "confluence:2", "source_type": "confluence",
+                     "ref": "PM/New Retail Location", "title": "New Retail Location V1",
+                     "body": "Checklist for opening a new retail location: "
+                             "addresses, shipping, payment methods, store pickup."},
+                ])
+                corpus.rebuild_term_stats()
+            with Historian() as hist:
+                hits = hist.sops("add two new retail locations", limit=3)
+            refs = [h["ref"] for h in hits]
+            self.assertIn("PM/New Retail Location", refs)
+            if "PM/Daily Notes" in refs:
+                self.assertLess(refs.index("PM/Daily Notes"),
+                                99)  # present is fine
+                self.assertGreater(refs.index("PM/Daily Notes"),
+                                   refs.index("PM/New Retail Location"),
+                                   "the specific page must outrank the sprawling one")
+
     def test_sop_outranks_raw_tickets(self):
         with sandbox():
             build_corpus()

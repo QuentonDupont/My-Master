@@ -26,6 +26,11 @@ RAW_DIR = config.CORPUS_DIR / "raw"
 
 #: source weight — SOPs outrank Confluence, which outranks raw tickets.
 SOURCE_WEIGHT = {"sop": 2.0, "confluence": 1.4, "jira": 1.0, "github": 0.8}
+#: A sprawling page ("2019 - PM Daily Notes") contains a bit of everything and
+#: would otherwise match every query. Documents far longer than a typical ticket
+#: are damped, not excluded.
+REFERENCE_TERMS = 120
+LENGTH_DAMPING = 0.3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -86,11 +91,26 @@ TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_\-]+")
 URL_RE = re.compile(r"https?://\S+|www\.\S+")
 
 
+def singular(term: str) -> str:
+    """Crude but effective plural folding: locations -> location.
+
+    Without it "Add two new locations" never matches "New Retail Location",
+    which is the page that answers it.
+    """
+    if len(term) > 3 and term.endswith("ies"):
+        return term[:-3] + "y"
+    if len(term) > 3 and term.endswith("ses"):
+        return term[:-2]
+    if len(term) > 3 and term.endswith("s") and not term.endswith(("ss", "us", "is")):
+        return term[:-1]
+    return term
+
+
 def keywords(text: str, limit: int = 18) -> list[str]:
     """Content words, most frequent first — used to build the FTS query."""
     counts: dict[str, int] = {}
     for tok in TOKEN_RE.findall(URL_RE.sub(" ", text or "")):
-        t = tok.lower()
+        t = singular(tok.lower())
         # Two letters is not too short here: PO, NS, WH, IR and SG are the
         # subject of half this board's tickets.
         if t in STOPWORDS or len(t) < 2:
@@ -233,7 +253,12 @@ class Corpus:
                 cov_doc = 0.0
             if len(shared) < 2 and not any(self.is_rare_term(t) for t in shared):
                 cov_query = 0.0
-            doc["similarity"] = round(max(cov_query, cov_doc), 3)
+            # Damp documents far longer than a ticket: they contain a bit of
+            # everything, and coverage of the query alone would float them to
+            # the top of every search.
+            length_penalty = min(1.0, (REFERENCE_TERMS / max(len(doc_terms), 1))
+                                 ** LENGTH_DAMPING)
+            doc["similarity"] = round(max(cov_query * length_penalty, cov_doc), 3)
             doc["shared_terms"] = sorted(shared, key=lambda t: -weights[t])[:6]
             scored.append(doc)
         scored.sort(key=lambda d: (-d["similarity"], -d["score"]))
