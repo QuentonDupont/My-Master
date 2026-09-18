@@ -1,0 +1,471 @@
+<title>PESD1 Triage Queue</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --ground: #f5f4f6;
+    --surface: #ffffff;
+    --surface-sunk: #faf9fb;
+    --ink: #17161a;
+    --ink-muted: #6c6775;
+    --ink-faint: #928d9b;
+    --line: #e5e2ea;
+    --line-strong: #d3cfdb;
+    --accent: #c0264f;
+    --accent-soft: #fdeef2;
+    --ok: #1c6b4a;
+    --ok-soft: #e8f4ee;
+    --warn: #96560a;
+    --warn-soft: #fbf0e3;
+    --stop: #a5241d;
+    --stop-soft: #fceeed;
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --r: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #131217;
+      --surface: #1b1a20;
+      --surface-sunk: #201f26;
+      --ink: #f1eff4;
+      --ink-muted: #a39eae;
+      --ink-faint: #7d7889;
+      --line: #2c2a33;
+      --line-strong: #3b3845;
+      --accent: #ff7096;
+      --accent-soft: #341c26;
+      --ok: #6cc79b;
+      --ok-soft: #14291f;
+      --warn: #e0a55f;
+      --warn-soft: #2c2115;
+      --stop: #f08a83;
+      --stop-soft: #2f1817;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #131217;
+    --surface: #1b1a20;
+    --surface-sunk: #201f26;
+    --ink: #f1eff4;
+    --ink-muted: #a39eae;
+    --ink-faint: #7d7889;
+    --line: #2c2a33;
+    --line-strong: #3b3845;
+    --accent: #ff7096;
+    --accent-soft: #341c26;
+    --ok: #6cc79b;
+    --ok-soft: #14291f;
+    --warn: #e0a55f;
+    --warn-soft: #2c2115;
+    --stop: #f08a83;
+    --stop-soft: #2f1817;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 0 16px 56px; }
+
+  header.bar {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 20;
+    background: color-mix(in srgb, var(--ground) 92%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    margin: 0 -16px;
+    padding: 12px 16px 10px;
+  }
+  .brandline { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .stamp { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
+  .counts { display: flex; gap: 14px; margin-top: 8px; font-size: 12px; color: var(--ink-muted); }
+  .counts b { font-family: var(--mono); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .chips { display: flex; gap: 6px; margin-top: 10px; overflow-x: auto; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip {
+    flex: 0 0 auto; border: 1px solid var(--line-strong); background: transparent;
+    color: var(--ink-muted); font: 500 12px/1 var(--sans); padding: 7px 11px;
+    border-radius: 999px; cursor: pointer;
+  }
+  .chip[aria-pressed="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+  .chip:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+
+  .list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+
+  article.card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--stripe, var(--line-strong));
+    border-radius: var(--r);
+  }
+  article.card[data-decided="true"] { opacity: 0.72; }
+  .head { display: flex; gap: 10px; align-items: flex-start; width: 100%;
+          background: none; border: 0; text-align: left; padding: 13px 14px;
+          font: inherit; color: inherit; cursor: pointer; }
+  .head:hover { background: var(--surface-sunk); border-radius: 8px; }
+  .meta { flex: 1; min-width: 0; }
+  .keyrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .key { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: -0.02em; }
+  .tag {
+    font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.04em;
+    text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
+  }
+  .tag.code { background: var(--accent-soft); color: var(--accent); }
+  .tag.answer { background: var(--ok-soft); color: var(--ok); }
+  .tag.escalate { background: var(--warn-soft); color: var(--warn); }
+  .tag.dupe { background: var(--surface-sunk); color: var(--ink-muted); }
+  .tag.state-approve { background: var(--ok-soft); color: var(--ok); }
+  .tag.state-reject { background: var(--stop-soft); color: var(--stop); }
+  .req { margin: 5px 0 0; font-size: 14px; line-height: 1.45; }
+  .flags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; }
+  .flag { font-family: var(--mono); font-size: 10px; color: var(--ink-faint);
+          border: 1px solid var(--line); padding: 1px 5px; border-radius: 4px; }
+  .conf { flex: 0 0 auto; text-align: right; }
+  .conf b { display: block; font-family: var(--mono); font-size: 14px; font-weight: 600;
+            font-variant-numeric: tabular-nums; }
+  .meter { width: 42px; height: 3px; background: var(--line); border-radius: 2px; margin-top: 4px; }
+  .meter i { display: block; height: 100%; background: var(--stripe, var(--ink-muted)); border-radius: 2px; }
+
+  .body { padding: 0 14px 14px; border-top: 1px solid var(--line); margin-top: 2px; }
+  .body[hidden] { display: none !important; }
+  .field { margin-top: 13px; }
+  .label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+           text-transform: uppercase; color: var(--ink-faint); }
+  .value { margin-top: 4px; font-size: 14px; }
+  .quote {
+    margin-top: 5px; background: var(--surface-sunk); border: 1px solid var(--line);
+    border-radius: 8px; padding: 11px 12px; font-size: 13.5px; white-space: pre-wrap;
+  }
+  ul.ev { list-style: none; margin: 5px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+  ul.ev li { font-size: 13px; color: var(--ink-muted); }
+  ul.ev code { font-family: var(--mono); font-size: 12px; color: var(--ink); }
+  a { color: var(--accent); }
+  .kv { display: flex; gap: 8px; font-size: 13.5px; padding: 3px 0; }
+  .kv span:first-child { color: var(--ink-muted); flex: 0 0 82px; }
+  select, textarea {
+    width: 100%; margin-top: 5px; font: inherit; font-size: 14px; color: var(--ink);
+    background: var(--surface-sunk); border: 1px solid var(--line-strong);
+    border-radius: 8px; padding: 9px 10px;
+  }
+  textarea { min-height: 62px; resize: vertical; }
+  .actions { display: flex; gap: 8px; margin-top: 15px; }
+  .btn {
+    flex: 1; padding: 12px 10px; border-radius: 9px; border: 1px solid transparent;
+    font: 600 14px/1 var(--sans); cursor: pointer;
+  }
+  .btn.approve { background: var(--ok); color: var(--surface); }
+  .btn.reject { background: transparent; color: var(--stop); border-color: var(--stop); }
+  .btn.undo { background: transparent; color: var(--ink-muted); border-color: var(--line-strong); }
+  .btn[disabled] { opacity: 0.5; cursor: default; }
+  .note { margin-top: 9px; font-size: 12px; color: var(--ink-muted); }
+  .note.err { color: var(--stop); }
+
+  .section-label {
+    margin: 24px 0 2px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-faint);
+  }
+  .empty { padding: 40px 16px; text-align: center; color: var(--ink-muted); font-size: 14px; }
+  footer { margin-top: 26px; font-size: 12px; color: var(--ink-faint); line-height: 1.6; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="bar">
+    <div class="brandline">
+      <h1>PESD1 Triage Queue</h1>
+      <span class="stamp" id="stamp">loading</span>
+    </div>
+    <div class="counts" id="counts"></div>
+    <div class="chips" id="chips">
+      <button class="chip" data-filter="pending" aria-pressed="true">Waiting on you</button>
+      <button class="chip" data-filter="decided" aria-pressed="false">Decided</button>
+      <button class="chip" data-filter="info" aria-pressed="false">Escalations</button>
+      <button class="chip" data-filter="all" aria-pressed="false">Everything</button>
+    </div>
+  </header>
+
+  <div class="list" id="list"></div>
+  <div class="empty" id="empty" hidden></div>
+
+  <footer>
+    Approving here records your decision only. Nothing is written to Jira until it is
+    executed from the triage repo, where the comment, the PRDT clone, the link, the
+    assignment and the status change all run as one reversible step.
+  </footer>
+</div>
+
+<script>
+  const STRIPE = {
+    NEEDS_CODE: "var(--accent)", ANSWERABLE: "var(--ok)",
+    ESCALATE: "var(--warn)", DUPLICATE: "var(--line-strong)",
+  };
+  const TAGCLASS = {
+    NEEDS_CODE: "code", ANSWERABLE: "answer", ESCALATE: "escalate", DUPLICATE: "dupe",
+  };
+  const listEl = document.getElementById("list");
+  const emptyEl = document.getElementById("empty");
+  const countsEl = document.getElementById("counts");
+  const stampEl = document.getElementById("stamp");
+
+  let db = null;
+  let docs = [];
+  let filter = "pending";
+  const open = new Set();
+  const busy = new Set();
+  const errors = new Map();
+
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const actionable = (p) => p.classification === "NEEDS_CODE" || p.classification === "ANSWERABLE";
+  const decided = (p) => p.decision === "approve" || p.decision === "reject";
+
+  function bucket(p) {
+    if (!actionable(p)) return "info";
+    return decided(p) ? "decided" : "pending";
+  }
+
+  function render() {
+    const buckets = { pending: 0, decided: 0, info: 0 };
+    docs.forEach((p) => { buckets[bucket(p)] += 1; });
+    countsEl.innerHTML =
+      `<span><b>${buckets.pending}</b> waiting</span>` +
+      `<span><b>${buckets.decided}</b> decided</span>` +
+      `<span><b>${buckets.info}</b> escalated</span>`;
+
+    const shown = docs
+      .filter((p) => filter === "all" || bucket(p) === filter)
+      .sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+
+    listEl.innerHTML = shown.map(card).join("");
+    emptyEl.hidden = shown.length > 0;
+    if (!shown.length) {
+      emptyEl.textContent = filter === "pending"
+        ? "Nothing waiting on you. New proposals appear here after the next triage run."
+        : "Nothing here yet.";
+    }
+    wire();
+  }
+
+  function card(p) {
+    const isOpen = open.has(p.id);
+    const cls = TAGCLASS[p.classification] || "dupe";
+    const conf = Math.round((p.confidence || 0) * 100);
+    const state = p.decision === "approve" ? '<span class="tag state-approve">approved</span>'
+      : p.decision === "reject" ? '<span class="tag state-reject">rejected</span>' : "";
+    return `
+      <article class="card" style="--stripe:${STRIPE[p.classification] || "var(--line-strong)"}"
+               data-decided="${decided(p)}">
+        <button class="head" data-toggle="${esc(p.id)}" aria-expanded="${isOpen}">
+          <span class="meta">
+            <span class="keyrow">
+              <span class="key">${esc(p.ticket)}</span>
+              <span class="tag ${cls}">${esc((p.classification || "").replace("_", " "))}</span>
+              ${state}
+            </span>
+            <p class="req">${esc(p.requirement)}</p>
+            ${(p.flags || []).length ? `<span class="flags">${p.flags.map(
+              (f) => `<span class="flag">${esc(f)}</span>`).join("")}</span>` : ""}
+          </span>
+          ${actionable(p) ? `<span class="conf"><b>${conf}</b>
+            <span class="meter"><i style="width:${conf}%"></i></span></span>` : ""}
+        </button>
+        <div class="body" id="body-${esc(p.id)}" ${isOpen ? "" : "hidden"}>${detail(p)}</div>
+      </article>`;
+  }
+
+  function detail(p) {
+    const parts = [];
+    parts.push(`<div class="field"><div class="label">Ticket</div>
+      <div class="value"><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.ticket)} on Jira</a></div></div>`);
+
+    parts.push(`<div class="field"><div class="label">Requester</div>
+      <div class="value">${p.requester_email
+        ? `${esc(p.requester_email)} <span style="color:var(--ink-muted)">— ${esc(p.requester_source)}, ${esc(p.requester_confidence)} confidence</span>`
+        : '<span style="color:var(--ink-muted)">unknown — needs a manual lookup</span>'}</div></div>`);
+
+    if ((p.evidence || []).length) {
+      parts.push(`<div class="field"><div class="label">Evidence</div>
+        <ul class="ev">${p.evidence.map((e) =>
+          `<li><code>${esc(e.ref)}</code> — ${esc(e.why)}</li>`).join("")}</ul></div>`);
+    }
+
+    if (p.comment) {
+      parts.push(`<div class="field"><div class="label">Comment to post on ${esc(p.ticket)}</div>
+        <div class="quote">${esc(p.comment)}</div></div>`);
+    }
+
+    const c = p.clone;
+    if (c) {
+      const picked = p.assignee_override || c.assignee;
+      const people = [c.assignee, ...(c.alternates || [])].filter(
+        (v, i, a) => v && a.indexOf(v) === i);
+      parts.push(`<div class="field"><div class="label">Clone into ${esc(c.target)} as a ${esc(c.issue_type)}</div>
+        <div class="quote">${esc(c.summary)}</div>
+        <div style="margin-top:9px">
+          <div class="kv"><span>Labels</span><span>${esc((c.labels || []).join(", ") || "none")}</span></div>
+          <div class="kv"><span>Priority</span><span>${esc(c.priority)}</span></div>
+          <div class="kv"><span>PESD1 →</span><span>${esc(p.transition || "unchanged")}</span></div>
+        </div>
+        <div style="margin-top:11px">
+          <div class="label">Assignee</div>
+          <select data-assignee="${esc(p.id)}" ${decided(p) ? "disabled" : ""}>
+            ${people.map((n) => `<option value="${esc(n)}" ${n === picked ? "selected" : ""}>${esc(n)}</option>`).join("")}
+          </select>
+          <div class="note">${esc(c.assignee_reason || "")}</div>
+        </div></div>`);
+    }
+
+    if (actionable(p)) {
+      const err = errors.get(p.id);
+      if (decided(p)) {
+        parts.push(`<div class="field">
+          <div class="note">You ${p.decision === "approve" ? "approved" : "rejected"} this${
+            p.note ? ` — “${esc(p.note)}”` : ""}.</div>
+          <div class="actions"><button class="btn undo" data-undo="${esc(p.id)}">Undo decision</button></div>
+        </div>`);
+      } else {
+        parts.push(`<div class="field">
+          <div class="label">Note (required to reject, optional to approve)</div>
+          <textarea id="note-${esc(p.id)}" data-note="${esc(p.id)}"
+            placeholder="What you changed, or why this is wrong">${esc(p.note || "")}</textarea>
+          <div class="actions">
+            <button class="btn approve" data-act="approve" data-id="${esc(p.id)}" ${busy.has(p.id) ? "disabled" : ""}>Approve</button>
+            <button class="btn reject" data-act="reject" data-id="${esc(p.id)}" ${busy.has(p.id) ? "disabled" : ""}>Reject</button>
+          </div>
+          ${err ? `<div class="note err">${esc(err)}</div>` : ""}
+        </div>`);
+      }
+    } else {
+      parts.push(`<div class="field"><div class="note">Escalated to you: the system proposes
+        no comment and no clone. Handle this one in Jira yourself.</div></div>`);
+    }
+    return parts.join("");
+  }
+
+  function wire() {
+    listEl.querySelectorAll("[data-toggle]").forEach((el) => {
+      el.onclick = () => {
+        const id = el.dataset.toggle;
+        open.has(id) ? open.delete(id) : open.add(id);
+        render();
+      };
+    });
+    listEl.querySelectorAll("[data-note]").forEach((el) => {
+      el.oninput = () => {
+        const p = docs.find((d) => d.id === el.dataset.note);
+        if (p) p.note = el.value;
+      };
+    });
+    listEl.querySelectorAll("[data-assignee]").forEach((el) => {
+      el.onchange = () => {
+        const p = docs.find((d) => d.id === el.dataset.assignee);
+        if (p) p.assignee_override = el.value;
+      };
+    });
+    listEl.querySelectorAll("[data-act]").forEach((el) => {
+      el.onclick = () => decide(el.dataset.id, el.dataset.act);
+    });
+    listEl.querySelectorAll("[data-undo]").forEach((el) => {
+      el.onclick = () => decide(el.dataset.undo, "pending");
+    });
+  }
+
+  async function decide(id, decision) {
+    const p = docs.find((d) => d.id === id);
+    if (!p || !db) return;
+    const noteEl = document.getElementById("note-" + id);
+    const note = noteEl ? noteEl.value.trim() : (p.note || "");
+    if (decision === "reject" && !note) {
+      errors.set(id, "Say why, so the system can learn from it.");
+      render();
+      return;
+    }
+    errors.delete(id);
+    busy.add(id);
+    render();
+    try {
+      await db.doc("proposals/" + id).update({
+        decision,
+        note: decision === "pending" ? "" : note,
+        assignee_override: p.assignee_override || null,
+        decided_at: decision === "pending" ? null : new Date().toISOString(),
+      });
+    } catch (e) {
+      errors.set(id, e && e.code === "invalid_argument"
+        ? "This view cannot record decisions — open the page from your own Claude account."
+        : "Could not save that. Try again in a moment.");
+    } finally {
+      busy.delete(id);
+      render();
+    }
+  }
+
+  document.getElementById("chips").onclick = (e) => {
+    const chip = e.target.closest(".chip");
+    if (!chip) return;
+    filter = chip.dataset.filter;
+    document.querySelectorAll(".chip").forEach(
+      (c) => c.setAttribute("aria-pressed", String(c === chip)));
+    render();
+  };
+
+  function toRow(snap) {
+    const d = snap.data() || {};
+    return {
+      id: snap.id,
+      ticket: d.ticket || snap.id,
+      url: d.url || "#",
+      classification: d.classification || "",
+      confidence: typeof d.confidence === "number" ? d.confidence : 0,
+      requirement: d.requirement || "",
+      requester_email: d.requester_email || "",
+      requester_source: d.requester_source || "unknown",
+      requester_confidence: d.requester_confidence || "unknown",
+      flags: Array.isArray(d.flags) ? d.flags : [],
+      comment: d.comment || "",
+      evidence: Array.isArray(d.evidence) ? d.evidence : [],
+      clone: d.clone || null,
+      transition: d.transition || "",
+      decision: d.decision || "pending",
+      note: d.note || "",
+      assignee_override: d.assignee_override || null,
+      generated: d.generated || "",
+    };
+  }
+
+  (async () => {
+    stampEl.textContent = "connecting";
+    db = await claude.use("db");
+    if (!db) {
+      stampEl.textContent = "offline";
+      emptyEl.hidden = false;
+      emptyEl.textContent = "This view cannot reach the proposal store. Open the page from your own Claude account.";
+      return;
+    }
+    db.collection("proposals").onSnapshot(
+      (snap) => {
+        docs = snap.docs.map(toRow);
+        const gen = docs.find((d) => d.generated);
+        stampEl.textContent = gen ? "batch " + gen.generated : docs.length + " proposals";
+        render();
+      },
+      () => {
+        stampEl.textContent = "disconnected";
+        emptyEl.hidden = false;
+        emptyEl.textContent = "Lost the connection to the proposal store. Reload the page.";
+      },
+    );
+  })();
+</script>

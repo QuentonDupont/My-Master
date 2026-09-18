@@ -106,6 +106,24 @@ into its context. Any failure falls back to the heuristic and flags the proposal
 
 ---
 
+## Reviewing from your phone
+
+`tools/review_app.html` is published as a private page on claude.ai. It shows the
+same batch, one card per proposal, and records approve / reject / reassign.
+
+```bash
+python3 -m agents.jira_leader.mobile export --out review/mobile   # seed documents
+# Claude writes them into the page's store, and reads your decisions back
+python3 -m agents.jira_leader.mobile apply review/decisions.json
+python3 -m agents.jira_leader.batch execute --execute
+```
+
+The page has no Jira credentials and no execution path — it records decisions and
+nothing else. Reassigning on the phone is logged to `knowledge/corrections.jsonl`
+exactly like an edit made in the batch file, so the learning loop sees it.
+
+---
+
 ## Daily loop
 
 ```bash
