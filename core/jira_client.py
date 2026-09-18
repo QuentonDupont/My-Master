@@ -205,6 +205,22 @@ class JiraReadClient(_Base):
                              f"outside allowed_projects")
         return data
 
+    def required_fields(self, project: str, issue_type: str) -> dict:
+        """Fields the project demands on create, with their allowed values."""
+        assert_project_allowed(project)
+        meta = self._request("GET", "/rest/api/2/issue/createmeta",
+                             params={"projectKeys": project,
+                                     "issuetypeNames": issue_type,
+                                     "expand": "projects.issuetypes.fields"})
+        for proj in meta.get("projects", []):
+            for it in proj.get("issuetypes", []):
+                if it.get("name") == issue_type:
+                    return {fid: f for fid, f in (it.get("fields") or {}).items()
+                            if f.get("required") and not f.get("hasDefaultValue")
+                            and fid not in ("project", "issuetype", "summary",
+                                            "description", "reporter")}
+        return {}
+
     def find_users(self, query: str, max_results: int = 10) -> list[dict]:
         return self._request("GET", "/rest/api/2/user/search",
                              params={"query": query, "maxResults": max_results})
@@ -243,7 +259,8 @@ class JiraWriteClient(_Base):
     # -- issues ------------------------------------------------------------
     def create_issue(self, project: str, summary: str, description: str,
                      issue_type: str, labels: list[str] | None = None,
-                     priority: str | None = None) -> dict:
+                     priority: str | None = None,
+                     extra_fields: dict | None = None) -> dict:
         assert_project_allowed(project)
         fields: dict[str, Any] = {
             "project": {"key": project},
@@ -255,6 +272,9 @@ class JiraWriteClient(_Base):
             fields["labels"] = labels
         if priority:
             fields["priority"] = {"name": priority}
+        # Project-mandated fields (PRDT requires Department, for example).
+        for key, value in (extra_fields or {}).items():
+            fields[key] = value
         return self._do("create_issue", {"project": project, "issue_type": issue_type,
                                          "summary": summary[:120]},
                         lambda: self._request("POST", "/rest/api/2/issue",
@@ -337,6 +357,8 @@ def main(argv: list[str] | None = None) -> int:
     p_t.add_argument("key")
     p_it = sub.add_parser("issue-types", help="issue types valid for a project")
     p_it.add_argument("--project", default=config.dev_project())
+    p_it.add_argument("--required", action="store_true",
+                      help="list the fields the project demands on create")
     args = ap.parse_args(argv)
 
     client = JiraReadClient()
@@ -359,9 +381,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{tr['id']:<6} -> {tr['to']['name']}")
     elif args.cmd == "issue-types":
         configured = config.dev_issue_type()
-        for it in client.issue_types(args.project):
-            mark = "  <- boards.yml" if it["name"] == configured else ""
-            print(f"{it['name']:<24} subtask={it.get('subtask')}{mark}")
+        if args.required:
+            for fid, field in client.required_fields(args.project, configured).items():
+                allowed = [a.get("value") or a.get("name")
+                           for a in (field.get("allowedValues") or [])][:10]
+                print(f"{fid:<22} {field['name']:<22}"
+                      + (f" allowed: {allowed}" if allowed else ""))
+        else:
+            for it in client.issue_types(args.project):
+                mark = "  <- boards.yml" if it["name"] == configured else ""
+                print(f"{it['name']:<24} subtask={it.get('subtask')}{mark}")
     return 0
 
 

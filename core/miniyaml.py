@@ -45,6 +45,17 @@ def _scalar(raw: str):
         if not inner:
             return []
         return [_scalar(p) for p in _split_flow(inner)]
+    if s.startswith("{") and s.endswith("}"):
+        inner = s[1:-1].strip()
+        if not inner:
+            return {}
+        out = {}
+        for part in _split_flow(inner):
+            kv = _split_key(part)
+            if kv is None:
+                raise MiniYamlError(f"expected 'key: value' in flow map at {part!r}")
+            out[kv[0].strip("\"'")] = _scalar(kv[1])
+        return out
     low = s.lower()
     if low in _NULL:
         return None if low != "" else None
@@ -90,7 +101,7 @@ def _split_flow(inner: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-def _split_key(content: str) -> tuple[str, str] | None:
+def _split_key(content: str) -> tuple[str, str] | None:  # noqa: F811
     """Split `key: value` outside quotes. Returns None if there is no key."""
     quote = None
     for i, ch in enumerate(content):

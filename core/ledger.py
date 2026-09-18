@@ -254,6 +254,26 @@ class Ledger:
         LOG.info("ledger.transition", ticket=ticket_key, **{"from": frm, "to": to_state})
         return self.get(ticket_key)  # type: ignore[return-value]
 
+    def note_progress(self, ticket_key: str, **fields) -> None:
+        """Record what a partially-completed execution already did.
+
+        Without this a retry after a mid-sequence failure would post a second
+        comment: the first one succeeded but nothing remembered it.
+        """
+        bad = set(fields) - {"comment_id", "clone_key"}
+        if bad:
+            raise LedgerError(f"note_progress does not write {sorted(bad)}")
+        sets = [f"{k} = ?" for k in fields]
+        if not sets:
+            return
+        with self._tx() as conn:
+            conn.execute(
+                f"UPDATE ledger SET {', '.join(sets)}, last_processed = ? "
+                f"WHERE ticket_key = ?",
+                (*fields.values(), now(), ticket_key),
+            )
+        LOG.info("ledger.progress", ticket=ticket_key, **fields)
+
     def record_error(self, ticket_key: str, error: str) -> None:
         with self._tx() as conn:
             conn.execute(

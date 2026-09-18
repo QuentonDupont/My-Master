@@ -27,8 +27,9 @@ class FakeWriter:
         return {"id": "c-100"}
 
     def create_issue(self, project, summary, description, issue_type,
-                     labels=None, priority=None):
-        self._record("clone", project=project, issue_type=issue_type)
+                     labels=None, priority=None, extra_fields=None):
+        self._record("clone", project=project, issue_type=issue_type,
+                     extra_fields=extra_fields or {})
         return {"key": "PRDT-999"}
 
     def link_issues(self, inward, outward, link_type):
@@ -201,6 +202,27 @@ class ExecuteTests(unittest.TestCase):
                 self.assertEqual(row["state"], L.ROLLED_BACK)
                 self.assertIsNone(row["clone_key"])
                 self.assertIsNone(row["comment_id"])
+
+    def test_retry_after_a_failure_does_not_repeat_completed_steps(self):
+        """The live run posted a comment, then the clone failed. A retry must
+        resume, not comment twice."""
+        with sandbox():
+            with L.Ledger() as led:
+                proposal = approved_proposal(led)
+                first = FakeWriter(fail_on="clone")
+                E.execute_proposal(proposal.proposal_id, execute=True, ledger=led,
+                                   writer=first, reader=FakeReader())
+                self.assertEqual([c[0] for c in first.calls], ["comment", "clone"])
+                self.assertEqual(led.get(proposal.ticket)["comment_id"], "c-100")
+
+                second = FakeWriter()
+                result = E.execute_proposal(proposal.proposal_id, execute=True,
+                                            ledger=led, writer=second,
+                                            reader=FakeReader())
+                self.assertTrue(result.ok)
+                self.assertNotIn("comment", [c[0] for c in second.calls])
+                self.assertEqual(result.comment_id, "c-100")
+                self.assertEqual(led.get(proposal.ticket)["state"], L.EXECUTED)
 
     def test_undo_refuses_when_nothing_was_executed(self):
         with sandbox():

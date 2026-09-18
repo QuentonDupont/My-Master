@@ -37,6 +37,11 @@ f: true
                                   "c": {"d": ["p", "q"], "e": "quoted: value"},
                                   "f": True})
 
+    def test_miniyaml_flow_maps(self):
+        """`required_fields: {}` must be an empty map, not the string "{}"."""
+        parsed = miniyaml.loads('a: {}\nb: {x: 1, y: two}\n')
+        self.assertEqual(parsed, {"a": {}, "b": {"x": 1, "y": "two"}})
+
     def test_miniyaml_handles_multiline_flow_lists(self):
         parsed = miniyaml.loads("k:\n  - one\nwords: [a, b,\n         c]\n")
         self.assertEqual(parsed["words"], ["a", "b", "c"])

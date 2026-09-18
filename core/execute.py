@@ -81,6 +81,26 @@ def _resolve_account_id(reader: JiraReadClient, assignee: str | None) -> str | N
     )
 
 
+def clone_fields(clone) -> dict:
+    """Extra fields PRDT demands on create, including the component's epic."""
+    dev = config.boards()["development"]
+    fields = dict(dev.get("required_fields") or {})
+    epic_field = dev.get("epic_link_field")
+    if not epic_field:
+        return fields
+    mapping = dev.get("epic_by_component") or {}
+    component = (clone.labels or [None])[0]
+    epic = mapping.get(component) or dev.get("default_epic") or ""
+    if not epic:
+        raise ExecutionRefused(
+            f"no epic configured for component {component!r}: set "
+            f"development.epic_by_component.{component} or development.default_epic "
+            f"in config/boards.yml — {config.dev_project()} rejects a Story without one"
+        )
+    fields[epic_field] = epic
+    return fields
+
+
 def _drop_link(writer: JiraWriteClient, clone_key: str, ticket: str) -> None:
     link_id = writer.find_link_id(clone_key, ticket)
     if link_id:
@@ -129,6 +149,13 @@ def execute_proposal(proposal_id: str, *, execute: bool = False,
                                  dry_run=not execute)
         ticket = proposal.ticket
         clone = proposal.clone
+        # A previous attempt may have completed some steps before failing. Those
+        # are recorded on the ledger row; never repeat them.
+        done_comment = row["comment_id"] if execute else None
+        done_clone = row["clone_key"] if execute else None
+        if done_comment or done_clone:
+            LOG.info("execute.resuming", ticket=ticket, comment_id=done_comment,
+                     clone_key=done_clone)
         prior_status: str | None = None
         if execute:
             try:
@@ -167,26 +194,43 @@ def execute_proposal(proposal_id: str, *, execute: bool = False,
 
         try:
             # 1. comment on PESD1
-            commented = run(
-                "comment",
-                lambda: writer.add_comment(ticket, proposal.proposed_comment),
-                {"ticket": ticket, "chars": len(proposal.proposed_comment)},
-            )
-            result.comment_id = commented.get("id") if isinstance(commented, dict) else None
+            if done_comment:
+                result.comment_id = done_comment
+                result.steps.append(StepResult("comment", True,
+                                               {"skipped": "already posted",
+                                                "comment_id": done_comment}))
+            else:
+                commented = run(
+                    "comment",
+                    lambda: writer.add_comment(ticket, proposal.proposed_comment),
+                    {"ticket": ticket, "chars": len(proposal.proposed_comment)},
+                )
+                result.comment_id = (commented.get("id")
+                                     if isinstance(commented, dict) else None)
+                if execute and result.comment_id:
+                    led.note_progress(ticket, comment_id=result.comment_id)
+                    led.journal(ticket, proposal_id, "comment.id", True,
+                                {"comment_id": result.comment_id})
 
             if clone:
                 # 2. create the PRDT clone
-                created = run(
-                    "clone",
-                    lambda: writer.create_issue(clone.target_project, clone.summary,
-                                                clone.description,
-                                                issue_type=config.dev_issue_type(),
-                                                labels=clone.labels,
-                                                priority=clone.priority),
-                    {"project": clone.target_project,
-                     "issue_type": config.dev_issue_type(),
-                     "summary": clone.summary[:120]},
-                )
+                if done_clone:
+                    created = {"key": done_clone}
+                    result.steps.append(StepResult("clone", True,
+                                                   {"skipped": "already created",
+                                                    "key": done_clone}))
+                else:
+                    created = run(
+                        "clone",
+                        lambda: writer.create_issue(
+                            clone.target_project, clone.summary, clone.description,
+                            issue_type=config.dev_issue_type(),
+                            labels=clone.labels, priority=clone.priority,
+                            extra_fields=clone_fields(clone)),
+                        {"project": clone.target_project,
+                         "issue_type": config.dev_issue_type(),
+                         "summary": clone.summary[:120]},
+                    )
                 # In a dry run there is no real key; use a placeholder so the
                 # remaining steps still run and get logged.
                 result.clone_key = (created.get("key") if isinstance(created, dict) else None) \
@@ -194,6 +238,8 @@ def execute_proposal(proposal_id: str, *, execute: bool = False,
                 if not result.clone_key:
                     raise _StepFailed("clone")
                 clone_key = result.clone_key
+                if execute and not done_clone:
+                    led.note_progress(ticket, clone_key=clone_key)
 
                 # 3. link the two
                 run("link",
@@ -308,6 +354,74 @@ def undo(ticket_key: str, *, execute: bool = False,
             led.close()
 
 
+def cleanup_partial(ticket_key: str, *, execute: bool = False,
+                    ledger: ledger_mod.Ledger | None = None,
+                    writer: JiraWriteClient | None = None,
+                    reader: JiraReadClient | None = None) -> ExecutionResult:
+    """Undo a half-finished execution so the proposal can be run again cleanly.
+
+    A step can succeed and the next one fail; worse, a failed attempt that
+    predates progress recording can leave a comment nothing remembers. This
+    finds every comment on the ticket whose body is this proposal's text,
+    deletes them all, deletes the clone if one was created, and clears the
+    ledger's progress fields — leaving the proposal APPROVED and safe to re-run.
+    """
+    own_ledger = ledger is None
+    led = ledger or ledger_mod.Ledger()
+    try:
+        row = led.get(ticket_key)
+        if row is None:
+            raise ExecutionRefused(f"{ticket_key} is not in the ledger")
+        if row["state"] == ledger_mod.EXECUTED:
+            raise ExecutionRefused(f"{ticket_key} is EXECUTED — use undo(), not cleanup")
+        if not row["proposal_id"]:
+            raise ExecutionRefused(f"{ticket_key} has no proposal")
+        proposal = proposals.load(row["proposal_id"])
+        reader = reader or JiraReadClient()
+        writer = writer or JiraWriteClient(execute=execute)
+        result = ExecutionResult(proposal_id=proposal.proposal_id, ticket=ticket_key,
+                                 dry_run=not execute)
+
+        wanted = (proposal.proposed_comment or "").strip()
+        mine = [c for c in reader.comments(ticket_key)
+                if (c.get("body") or "").strip() == wanted]
+        for comment in mine:
+            detail = {"comment_id": comment["id"]}
+            try:
+                writer.delete_comment(ticket_key, comment["id"])
+                led.journal(ticket_key, proposal.proposal_id, "cleanup.delete_comment",
+                            True, detail)
+                result.steps.append(StepResult("cleanup.delete_comment", True, detail))
+            except Exception as exc:
+                led.journal(ticket_key, proposal.proposal_id, "cleanup.delete_comment",
+                            False, {"error": str(exc), **detail})
+                result.steps.append(StepResult("cleanup.delete_comment", False, detail,
+                                               str(exc)))
+                result.ok = False
+
+        if row["clone_key"]:
+            detail = {"key": row["clone_key"]}
+            try:
+                writer.delete_issue(row["clone_key"])
+                led.journal(ticket_key, proposal.proposal_id, "cleanup.delete_clone",
+                            True, detail)
+                result.steps.append(StepResult("cleanup.delete_clone", True, detail))
+            except Exception as exc:
+                result.steps.append(StepResult("cleanup.delete_clone", False, detail,
+                                               str(exc)))
+                result.ok = False
+
+        if execute and result.ok:
+            led.note_progress(ticket_key, comment_id=None, clone_key=None)
+            led.record_error(ticket_key, "partial execution cleaned up; safe to re-run")
+        LOG.info("execute.cleanup", ticket=ticket_key, comments=len(mine),
+                 ok=result.ok, dry_run=not execute)
+        return result
+    finally:
+        if own_ledger:
+            led.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="python -m core.execute",
@@ -320,11 +434,17 @@ def main(argv: list[str] | None = None) -> int:
     p_undo = sub.add_parser("undo")
     p_undo.add_argument("ticket")
     p_undo.add_argument("--execute", action="store_true")
+    p_clean = sub.add_parser("cleanup",
+                             help="undo a half-finished execution so it can re-run")
+    p_clean.add_argument("ticket")
+    p_clean.add_argument("--execute", action="store_true")
     args = ap.parse_args(argv)
 
     try:
         if args.cmd == "run":
             res = execute_proposal(args.proposal_id, execute=args.execute)
+        elif args.cmd == "cleanup":
+            res = cleanup_partial(args.ticket, execute=args.execute)
         else:
             res = undo(args.ticket, execute=args.execute)
     except ExecutionRefused as exc:

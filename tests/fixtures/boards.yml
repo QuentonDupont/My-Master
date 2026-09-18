@@ -31,6 +31,10 @@ development:
     - Closed
   default_priority: Medium
   link_type: is cloned by
+  required_fields: {}
+  epic_link_field: ""
+  epic_by_component: {}
+  default_epic: ""
 
 # Hard allowlist. core/jira_client.py refuses any key outside this list.
 allowed_projects:

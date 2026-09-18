@@ -37,6 +37,21 @@ development:
     - Closed - Won't Do
   default_priority: Medium
   link_type: is cloned by
+  # Fields PRDT demands on create. Discover them with:
+  #   python -m core.jira_client issue-types --project PRDT --required
+  # Each entry is a Jira field id and the value object the API expects.
+  required_fields:
+    customfield_10199:
+      value: Technology
+  # PRDT validates that every Story has an Epic Link (createmeta does not
+  # declare this — only a create attempt reveals it). Field id, then the epic
+  # each component's clones belong under. `default` catches the rest; with no
+  # default and no match, execution stops rather than guessing an epic.
+  epic_link_field: customfield_10008
+  epic_by_component:
+    netsuite: PRDT-10732      # NetSuite Support Tickets
+    api: PRDT-10842           # [API] API bugs and incidents
+  default_epic: ""
 
 # Hard allowlist. core/jira_client.py refuses any key outside this list.
 allowed_projects:
