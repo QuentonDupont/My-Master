@@ -387,18 +387,37 @@ class JiraWriteClient(_Base):
         return self.assign(key, None)
 
     # -- transitions -------------------------------------------------------
-    def transition(self, key: str, status_name: str) -> dict:
+    def transition(self, key: str, status_name: str,
+                   fields: dict | None = None) -> dict:
+        """Move an issue. Some transitions demand fields — PRDT's
+        "Closed - Won't Do" requires a Resolution — so they can be passed here."""
         assert_key_allowed(key)
         reader = JiraReadClient(self.base_url, self.email, self.token)
 
         def go() -> dict:
             for tr in reader.transitions(key):
                 if tr["to"]["name"].lower() == status_name.lower():
+                    body: dict = {"transition": {"id": tr["id"]}}
+                    if fields:
+                        body["fields"] = fields
                     return self._request("POST", f"/rest/api/2/issue/{key}/transitions",
-                                         body={"transition": {"id": tr["id"]}})
+                                         body=body)
             raise JiraError(409, key, f"no transition to {status_name!r} available")
 
-        return self._do("transition", {"key": key, "to": status_name}, go)
+        return self._do("transition",
+                        {"key": key, "to": status_name,
+                         "fields": sorted(fields) if fields else None}, go)
+
+    def transition_fields(self, key: str, status_name: str) -> dict:
+        """Fields a transition requires, with their allowed values."""
+        reader = JiraReadClient(self.base_url, self.email, self.token)
+        data = reader._request("GET", f"/rest/api/2/issue/{key}/transitions",
+                               params={"expand": "transitions.fields"})
+        for tr in data.get("transitions", []):
+            if tr["to"]["name"].lower() == status_name.lower():
+                return {fid: f for fid, f in (tr.get("fields") or {}).items()
+                        if f.get("required")}
+        return {}
 
     def current_status(self, key: str) -> str:
         reader = JiraReadClient(self.base_url, self.email, self.token)

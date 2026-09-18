@@ -543,6 +543,90 @@ def restore_description(ticket_key: str, *, execute: bool = False,
             led.close()
 
 
+def close_recommended(ticket_key: str, *, execute: bool = False,
+                      status: str | None = None,
+                      ledger: ledger_mod.Ledger | None = None,
+                      writer: JiraWriteClient | None = None,
+                      reader: JiraReadClient | None = None) -> ExecutionResult:
+    """Close a ticket the system recommended closing, once a human approves.
+
+    Invariant 9 forbids DELETING a ticket and makes closing a human decision.
+    This is that decision being carried out: it refuses unless an open
+    recommendation exists for exactly this ticket, and it records the status it
+    came from so `reopen()` can put it back. Nothing here deletes anything.
+    """
+    from core import recommendations
+
+    own_ledger = ledger is None
+    led = ledger or ledger_mod.Ledger()
+    try:
+        entry = next((r for r in recommendations.open_items()
+                      if r["ticket"] == ticket_key
+                      and r["action"] == recommendations.CLOSE), None)
+        if entry is None:
+            raise ExecutionRefused(
+                f"no open '{recommendations.CLOSE}' recommendation for {ticket_key} — "
+                f"the system does not close a ticket on its own initiative")
+        target = status or config.boards()["development"]["resolved_statuses"][-1]
+        reader = reader or JiraReadClient()
+        writer = writer or JiraWriteClient(execute=execute)
+        before = reader.issue(ticket_key, fields="status")["fields"]["status"]["name"]
+
+        result = ExecutionResult(proposal_id=entry.get("source_ticket") or "",
+                                 ticket=ticket_key, dry_run=not execute)
+        required = writer.transition_fields(ticket_key, target) if execute else {}
+        fields = {}
+        if "resolution" in required:
+            fields["resolution"] = {
+                "name": config.boards()["development"].get("close_resolution")
+                        or "Won't Do"}
+        try:
+            writer.transition(ticket_key, target, fields=fields or None)
+            if execute:
+                led.journal(ticket_key, None, "close_recommended", True,
+                            {"from": before, "to": target, "reason": entry["reason"],
+                             "fields": fields})
+                recommendations.resolve(entry["id"], "done")
+            result.steps.append(StepResult("close", True,
+                                           {"key": ticket_key, "from": before,
+                                            "to": target}))
+        except Exception as exc:
+            result.ok = False
+            result.steps.append(StepResult("close", False, {"key": ticket_key},
+                                           str(exc)))
+        LOG.info("execute.close_recommended", ticket=ticket_key, to=target,
+                 ok=result.ok, dry_run=not execute)
+        return result
+    finally:
+        if own_ledger:
+            led.close()
+
+
+def reopen(ticket_key: str, *, execute: bool = False,
+           ledger: ledger_mod.Ledger | None = None,
+           writer: JiraWriteClient | None = None) -> ExecutionResult:
+    """Undo of close_recommended: back to the status it was closed from."""
+    own_ledger = ledger is None
+    led = ledger or ledger_mod.Ledger()
+    try:
+        previous = None
+        for entry in led.journal_for(ticket_key):
+            if entry["step"] == "close_recommended" and entry["detail"]:
+                previous = json.loads(entry["detail"]).get("from")
+        if not previous:
+            raise ExecutionRefused(f"no recorded close for {ticket_key}")
+        writer = writer or JiraWriteClient(execute=execute)
+        result = ExecutionResult(proposal_id="", ticket=ticket_key,
+                                 dry_run=not execute)
+        writer.transition(ticket_key, previous)
+        result.steps.append(StepResult("reopen", True, {"key": ticket_key,
+                                                        "to": previous}))
+        return result
+    finally:
+        if own_ledger:
+            led.close()
+
+
 def cleanup_partial(ticket_key: str, *, execute: bool = False,
                     ledger: ledger_mod.Ledger | None = None,
                     writer: JiraWriteClient | None = None,
@@ -633,6 +717,14 @@ def main(argv: list[str] | None = None) -> int:
     p_rs = sub.add_parser("restore-description", help="undo of redescribe")
     p_rs.add_argument("ticket")
     p_rs.add_argument("--execute", action="store_true")
+    p_close = sub.add_parser("close",
+                             help="close a ticket the human approved closing")
+    p_close.add_argument("ticket")
+    p_close.add_argument("--status")
+    p_close.add_argument("--execute", action="store_true")
+    p_reopen = sub.add_parser("reopen", help="undo of close")
+    p_reopen.add_argument("ticket")
+    p_reopen.add_argument("--execute", action="store_true")
     p_clean = sub.add_parser("cleanup",
                              help="undo a half-finished execution so it can re-run")
     p_clean.add_argument("ticket")
@@ -650,6 +742,11 @@ def main(argv: list[str] | None = None) -> int:
             res = redescribe_clone(args.ticket, execute=args.execute)
         elif args.cmd == "restore-description":
             res = restore_description(args.ticket, execute=args.execute)
+        elif args.cmd == "close":
+            res = close_recommended(args.ticket, execute=args.execute,
+                                    status=args.status)
+        elif args.cmd == "reopen":
+            res = reopen(args.ticket, execute=args.execute)
         elif args.cmd == "cleanup":
             res = cleanup_partial(args.ticket, execute=args.execute)
         else:

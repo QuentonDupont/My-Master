@@ -5,6 +5,9 @@
 # Weighted above raw ticket history (corpus/index.py: SOURCE_WEIGHT), because a
 # written procedure beats inferring one from how a ticket happened to be closed.
 spaces:
+  - key: PSD
+    name: Pomelo Service Desk
+    limit: 400
   - key: PM
     name: Product Management
     # Pages per space. Raise it when the corpus proves useful; each page is one
@@ -12,7 +15,6 @@ spaces:
     limit: 400
 
 # Candidates not indexed yet — add them when you want them in scope:
-#   PSD  Pomelo Service Desk
 #   DO   DevOps
 #   PRA  Pomelo Retail API
 #   POMQ PomQ
