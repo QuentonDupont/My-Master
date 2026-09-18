@@ -26,7 +26,10 @@ def base(**kw) -> dict:
 
 def clone(**kw) -> dict:
     c = {"target_project": "PRDT", "summary": "[stock-sync] stale stock",
-         "description": "verbatim requirement\n\n---\n\ndev summary",
+         "description": ("h2. Ask\n\nStock is stale after the import.\n\n"
+                         "h2. Original request\n\n{quote}\nStock levels are not "
+                         "updating after the nightly bulk import on the THA "
+                         "warehouse.\n{quote}\n"),
          "assignee": "dev.one", "assignee_reason": "closed 7 of last 10",
          "assignee_alternates": ["dev.two"], "labels": [], "priority": "Medium",
          "link_type": "is cloned by"}
@@ -60,11 +63,21 @@ class ProposalValidationTests(unittest.TestCase):
                                    pesd1_transition="In Development"))
         self.assertTrue(any("assignee_alternates" in p for p in problems))
 
-    def test_clone_description_keeps_verbatim_requirement(self):
+    def test_clone_description_keeps_the_request_verbatim(self):
+        """The requester's own words must reach the developer unedited."""
+        problems = P.validate(base(
+            classification="NEEDS_CODE",
+            clone=clone(description="A summary written by the system, long enough "
+                                    "to pass the length floor but carrying none of "
+                                    "the requester's own words anywhere in it."),
+            pesd1_transition="In Development"))
+        self.assertTrue(any("verbatim" in p for p in problems), problems)
+
+    def test_clone_description_must_be_worth_reading(self):
         problems = P.validate(base(classification="NEEDS_CODE",
-                                   clone=clone(description="only a dev summary"),
+                                   clone=clone(description="{quote}fix it{quote}"),
                                    pesd1_transition="In Development"))
-        self.assertTrue(any("verbatim" in p for p in problems))
+        self.assertTrue(any("too thin" in p for p in problems), problems)
 
     def test_unknown_requester_needs_a_flag_and_no_email(self):
         problems = P.validate(base(requester={"email": "guessed@x.com",

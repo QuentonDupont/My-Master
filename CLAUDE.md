@@ -136,7 +136,7 @@ NEW -> CLAIMED -> PROPOSED -> APPROVED|CORRECTED|REJECTED -> EXECUTED
   "clone": {
     "target_project": "PRDT",
     "summary": "...",
-    "description": "<user requirement verbatim>\n\n---\n\n<developer summary>",
+    "description": "Ask / Now / Wanted, a facts table, Start here (links to\n                     the procedure and the precedent), Possibly already covered,\n                     the original request quoted verbatim, Unknowns",
     "assignee": "dev.name",
     "assignee_reason": "closed 7 of last 10 PRDT tickets with component=stock-sync",
     "assignee_alternates": ["dev.two", "dev.three"],

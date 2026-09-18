@@ -56,6 +56,12 @@ PENDING_MARKERS = ("waiting", "will check", "will update", "pending", "on hold",
 #: developer to read a voucher ticket about a purchase-order problem. This is
 #: deliberately stricter than the floor for citing evidence on a proposal.
 HISTORY_MIN_SIMILARITY = 0.35
+#: Calling a page "the procedure" sends a developer off to read it, so the claim
+#: has to be earned. A score alone cannot separate "New Retail Location V1" (0.38,
+#: exactly right) from "SG Store Visit - Engineers 28 Jun 2019" (0.43, noise
+#: matched deep in its body). A page whose TITLE shares subject words with the
+#: request can: a procedure is about the thing its title names.
+PROCEDURE_MIN_SIMILARITY = 0.30
 #: title-case runs starting with these are the request, not a place or a thing
 _NOT_ENTITY_LEAD = {
     "cancel", "add", "update", "remove", "create", "delete", "please", "revert",
@@ -79,7 +85,10 @@ def entities(text: str) -> dict[str, list[str]]:
     """Shops, sites and reference numbers — the details a developer needs to
     reproduce anything."""
     clean = URL_RE.sub(" ", text or "")
-    names = [m.strip() for m in QUOTED_RE.findall(clean)]
+    # A quoted phrase is only a name if it looks like one. "invalid code" is the
+    # error the requester quoted, not a shop.
+    names = [m.strip() for m in QUOTED_RE.findall(clean)
+             if any(c.isupper() or c.isdigit() for c in m)]
     for m in TITLECASE_RE.findall(clean):
         m = m.strip()
         words = m.split()
@@ -133,7 +142,13 @@ def _table(rows: list[list[str]], headers: list[str]) -> list[str]:
 
 
 def build(issue: dict, retrieval, analysis, requester=None) -> str:
-    """The full clone description."""
+    """The clone description.
+
+    Written to be scanned, not read: the ask first, the facts as a table, the
+    evidence as links. A developer should know what to do in ten seconds and be
+    able to go deeper if they need to. Empty sections are omitted rather than
+    filled with a sentence saying they are empty.
+    """
     fields = issue.get("fields", {}) or {}
     key = issue["key"]
     summary = (fields.get("summary") or "").strip()
@@ -146,145 +161,96 @@ def build(issue: dict, retrieval, analysis, requester=None) -> str:
     sentences = _sentences(full)
     ents = entities(full)
     component = (retrieval.components or ["unclassified"])[0]
-
-    out: list[str] = []
-
-    # -- overview ----------------------------------------------------------
-    out += ["h2. Overview", "",
-            f"{analysis.requirement_restated}", "",
-            f"Raised on {key} and cloned here for the {component} area.", ""]
-
-    # -- current behaviour -------------------------------------------------
-    current = _pick(sentences, PROBLEM_MARKERS)
-    out += ["h2. Current result", ""]
-    out += ([f"* {s}" for s in current] if current else
-            ["_The ticket does not describe the current behaviour. Confirm with the "
-             "requester before starting._"])
-    out.append("")
-
-    # -- expected outcome --------------------------------------------------
-    expected = _pick(sentences, EXPECTATION_MARKERS)
-    out += ["h2. Expected outcome", ""]
-    out += ([f"* {s}" for s in expected] if expected else
-            [f"* {analysis.requirement_restated}"])
-    out.append("")
-
-    # -- details -----------------------------------------------------------
-    reporter = ((fields.get("reporter") or {}) or {}).get("displayName") or "unknown"
-    raised = (fields.get("created") or "")[:10]
     from agents.jira_leader.analysis import clone_priority
 
     priority, priority_why, _ = clone_priority(issue)
-    rows = [["Source ticket", key],
-            ["Reported by", reporter],
-            ["Raised", raised],
-            ["Priority", f"{priority} — {priority_why}"]]
-    if requester is not None and getattr(requester, "email", None):
-        rows.append(["Requester", f"{requester.email} ({requester.confidence} confidence)"])
+
+    out: list[str] = []
+
+    # -- the ask, in one line ---------------------------------------------
+    ask = analysis.requirement_restated
+    for prefix in ("Requester reports:", "Requester asks:"):
+        if ask.startswith(prefix):
+            ask = ask[len(prefix):].strip()
+    out += [f"h2. Ask", "", ask, ""]
+
+    current = _pick(sentences, PROBLEM_MARKERS, limit=2)
+    expected = _pick(sentences, EXPECTATION_MARKERS, limit=2)
+    # Only add these when they say something the ask line did not.
+    def adds_information(lines: list[str]) -> bool:
+        return bool(lines) and not all(line.strip() in ask for line in lines)
+
+    if adds_information(current):
+        out += ["*Now:* " + " ".join(current), ""]
+    if adds_information(expected):
+        out += ["*Wanted:* " + " ".join(expected), ""]
+
+    # -- facts -------------------------------------------------------------
+    rows = [["From", f"{key} ({priority}, {(fields.get('created') or '')[:10]})"]]
     if ents["names"]:
-        rows.append(["Shops / entities named", ", ".join(ents["names"])])
+        rows.append(["Shops / entities", ", ".join(ents["names"][:5])])
     if ents["references"]:
-        rows.append(["References", ", ".join(ents["references"])])
-    if fields.get("labels"):
-        rows.append(["Labels on the request", ", ".join(fields["labels"])])
-    out += ["h2. Request details", ""] + _table(rows, ["Field", "Value"]) + [""]
+        rows.append(["References", ", ".join(ents["references"][:5])])
+    if requester is not None and getattr(requester, "email", None):
+        rows.append(["Requester", requester.email])
+    rows.append(["Area", component])
+    out += _table(rows, ["", ""]) + [""]
 
     if ents["links"]:
-        out += ["The requester attached detail outside Jira — read this before "
-                "estimating:", ""]
-        out += [f"* {u}" for u in ents["links"]] + [""]
+        out += ["*The detail is in the attachment — read it first:* "
+                + " ".join(ents["links"][:3]), ""]
 
-    # -- verbatim ----------------------------------------------------------
-    verbatim = "\n\n".join(p for p in [summary, body] if p)
-    out += ["h2. Original request (verbatim)", "", "{quote}", verbatim, "{quote}", ""]
-    if comments:
-        out += ["Comments on the request:", "", "{quote}",
-                "\n\n".join(comments[:3])[:1200], "{quote}", ""]
+    # -- evidence, as links ------------------------------------------------
+    pointers = []
+    from corpus.index import keywords as _keywords
 
-    # -- history -----------------------------------------------------------
+    subject_terms = set(_keywords(f"{summary} {body}", 25))
+    procedures = [d for d in retrieval.sops
+                  if d.get("similarity", 0) >= PROCEDURE_MIN_SIMILARITY
+                  and subject_terms & set(_keywords(d.get("title") or "", 20))]
+    for sop in procedures[:2]:
+        link = sop.get("url") or ""
+        title = f"[{sop['title']}|{link}]" if str(link).startswith("http") else sop["title"]
+        pointers.append(f"* Procedure: {title}")
+
     history = [d for d in (retrieval.similar_resolved or [])
-               if d.get("similarity", 0) >= HISTORY_MIN_SIMILARITY][:MAX_HISTORY]
-    out += ["h2. Related history", ""]
-    if history:
-        rows = []
-        for doc in history:
-            outcome = doc.get("resolution") or doc.get("status") or "—"
-            who = doc.get("assignee") or "unassigned"
-            note = resolution_note(doc) or "no resolution note on the ticket"
-            rows.append([doc["ref"], doc["title"][:70], f"{outcome} ({who})", note])
-        out += _table(rows, ["Ticket", "What it was", "Outcome", "How it was resolved"])
-        out.append("")
-        if ents["links"] and not body:
-            out += ["_These were matched on the request's title alone, because its "
-                    "detail is in the attachment above. Read the attachment before "
-                    "trusting the comparison._", ""]
-    else:
-        weak = (retrieval.similar_resolved or [])[:2]
-        out += [f"_Nothing comparable enough to be worth reading in the last 6 months "
-                f"of {config.intake_project()} and {config.dev_project()}. Treat this "
-                f"as new ground._", ""]
-        if weak:
-            out += ["The nearest tickets were "
-                    + ", ".join(f"{d['ref']} ({d.get('similarity', 0):.0%} overlap)"
-                                for d in weak)
-                    + " — checked and judged unrelated.", ""]
+               if d.get("similarity", 0) >= HISTORY_MIN_SIMILARITY][:3]
+    for doc in history:
+        note = resolution_note(doc, 180)
+        outcome = doc.get("resolution") or doc.get("status") or "—"
+        pointers.append(f"* {doc['ref']} ({outcome})"
+                        + (f": {note}" if note else " — no note on the ticket"))
+    if pointers:
+        out += ["h2. Start here", ""] + pointers + [""]
 
     overlap = (retrieval.duplicates or []) + (retrieval.related or [])
     if overlap:
-        out += ["h3. Possibly the same request", ""]
-        rows = []
-        for doc in overlap:
-            clones = ", ".join(f"{c['key']} ({c['status']})"
-                               for c in doc.get("open_clones", [])) or "no dev ticket"
-            rows.append([doc["ref"], doc["title"][:70], clones])
-        out += _table(rows, ["Open ticket", "What it asks for", "Dev work"])
-        out += ["", "*Check these before starting — the work may already be under way.*",
-                ""]
+        lines = []
+        for doc in overlap[:3]:
+            clones = ", ".join(c["key"] for c in doc.get("open_clones", []))
+            lines.append(f"* {doc['ref']} — {doc['title'][:60]}"
+                         + (f" (already in {clones})" if clones else ""))
+        out += ["h2. Possibly already covered", ""] + lines + [""]
 
-    # -- where to start ----------------------------------------------------
-    out += ["h2. Where to start", ""]
-    started = False
-    for sop in retrieval.sops[:2]:
-        link = sop.get("url") or ""
-        where = "the SOP" if sop.get("source_type") == "sop" else "the written procedure"
-        title = f"[{sop['title']}|{link}]" if link.startswith("http") else sop["title"]
-        out += [f"* Read {where} {title} — it covers this kind of request.", ""]
-        started = True
-    if history:
-        # The nearest ticket by wording is not always the one that says what was
-        # done — pick the precedent whose resolution note actually explains
-        # something, preferring closer matches when they are comparable.
-        def informativeness(note: str) -> int:
-            low = note.lower()
-            return (sum(m in low for m in DONE_MARKERS)
-                    - 2 * sum(m in low for m in PENDING_MARKERS))
+    # -- the request itself ------------------------------------------------
+    verbatim = "\n\n".join(p for p in [summary, body] if p)
+    out += ["h2. Original request", "", "{quote}", verbatim, "{quote}", ""]
+    if comments:
+        out += ["{quote}", "\n\n".join(comments[:2])[:800], "{quote}", ""]
 
-        scored = [(doc, resolution_note(doc, 400)) for doc in history]
-        usable = [(doc, note) for doc, note in scored if len(note) > 60]
-        if usable:
-            best, note = max(usable, key=lambda pair: (informativeness(pair[1]),
-                                                       pair[0].get("similarity", 0)))
-            out += [f"* {best['ref']} is the closest precedent that records what was "
-                    f"done: {note}", ""]
-            started = True
-    if not started:
-        out += ["* No precedent and no SOP. Scope this one before estimating.", ""]
-
-    # -- open questions ----------------------------------------------------
+    # -- what nobody knows -------------------------------------------------
     questions = []
+    if not current and not body:
+        questions.append("The ticket does not say what is happening today.")
     if requester is not None and not getattr(requester, "email", None):
-        questions.append("Who raised this? The requester could not be identified "
-                         "automatically — ask before replying directly.")
+        questions.append("Requester not identified — ask before replying directly.")
     if ents["links"]:
-        questions.append("The detail is in an attachment the triage system cannot "
-                         "read; the sections above come from the ticket text only.")
-    if not current:
-        questions.append("The current behaviour is not described.")
-    if overlap:
-        questions.append("Possible duplicate — see the table above.")
+        questions.append("Triage could not read the attachment; the above comes "
+                         "from the ticket text only.")
+    if not history and not procedures:
+        questions.append("No precedent and no written procedure — scope before "
+                         "estimating.")
     if questions:
-        out += ["h2. Open questions", ""] + [f"* {q}" for q in questions] + [""]
+        out += ["h2. Unknowns", ""] + [f"* {q}" for q in questions] + [""]
 
-    out += ["----", f"_Drafted by the triage system from {key} and the tickets above, "
-            f"and approved by a human before it was created._"]
     return "\n".join(out).strip()

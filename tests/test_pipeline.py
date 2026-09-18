@@ -60,12 +60,13 @@ class PipelineTests(unittest.TestCase):
             build_corpus()
             run_queue()
             clone = next(p.clone for p in P.load_all() if p.clone)
-            for heading in ("h2. Overview", "h2. Current result",
-                            "h2. Expected outcome", "h2. Request details",
-                            "h2. Original request (verbatim)",
-                            "h2. Related history", "h2. Where to start"):
+            for heading in ("h2. Ask", "h2. Original request"):
                 self.assertIn(heading, clone.description, heading)
             self.assertIn("{quote}", clone.description)
+            # written to be scanned: no filler sections, and short enough to read
+            self.assertLess(len(clone.description), 4000)
+            self.assertNotIn("does not describe the current behaviour",
+                             clone.description)
 
     def test_a_screenshot_is_not_a_resolution_note(self):
         from agents.jira_leader.description import resolution_note
@@ -82,11 +83,12 @@ class PipelineTests(unittest.TestCase):
     def test_entities_are_the_subject_not_the_verb(self):
         from agents.jira_leader.description import entities
         found = entities('Add two new locations in NS - "TH Central Si Racha" '
-                         'and "TH Happitat", order 3161582')
+                         'and "TH Happitat", order 3161582, error "invalid code"')
         self.assertIn("TH Central Si Racha", found["names"])
         self.assertIn("TH Happitat", found["names"])
         self.assertIn("3161582", found["references"])
         self.assertNotIn("Add Two", found["names"])
+        self.assertNotIn("invalid code", found["names"])
 
     def test_priority_is_carried_from_the_source_ticket(self):
         from agents.jira_leader.analysis import clone_priority

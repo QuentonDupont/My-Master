@@ -218,8 +218,13 @@ def validate(data: dict) -> list[str]:  # noqa: C901 - a checklist, kept flat on
         desc = clone.get("description") or ""
         if not desc.strip():
             p.append("clone.description is empty")
-        elif "---" not in desc:
-            p.append("clone.description must be '<requirement verbatim>\\n\\n---\\n\\n<dev summary>'")
+        elif "{quote}" not in desc and "---" not in desc:
+            # The requester's own words must reach the developer unedited,
+            # separated from anything the system wrote about them.
+            p.append("clone.description must carry the request verbatim, quoted "
+                     "and separated from the summary")
+        elif len(desc) < 120:
+            p.append("clone.description is too thin to work from")
         alternates = clone.get("assignee_alternates")
         if not isinstance(alternates, list) or not alternates:
             p.append("clone.assignee_alternates is required — give a ranked shortlist")
