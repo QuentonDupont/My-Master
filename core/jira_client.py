@@ -173,6 +173,28 @@ class JiraReadClient(_Base):
                 return proj.get("issuetypes", [])
         return []
 
+    def issue_link_types(self) -> list[dict]:
+        return self._request("GET", "/rest/api/2/issueLinkType").get("issueLinkTypes", [])
+
+    def my_permissions(self, project: str, permissions: list[str]) -> dict:
+        """What this token may actually do on a project. Read-only."""
+        assert_project_allowed(project)
+        data = self._request("GET", "/rest/api/2/mypermissions",
+                             params={"projectKey": project,
+                                     "permissions": ",".join(permissions)})
+        return {name: bool(spec.get("havePermission"))
+                for name, spec in (data.get("permissions") or {}).items()}
+
+    def board_configuration(self, board_id: int | str) -> dict:
+        """Agile board config. Refuses a board that is not on an allowed project."""
+        data = self._request("GET", f"/rest/agile/1.0/board/{board_id}/configuration")
+        location_key = ((data.get("location") or {}).get("projectKey")
+                        or (data.get("location") or {}).get("key"))
+        if location_key and location_key not in config.allowed_projects():
+            raise ScopeError(f"board {board_id} belongs to {location_key}, "
+                             f"outside allowed_projects")
+        return data
+
     def find_users(self, query: str, max_results: int = 10) -> list[dict]:
         return self._request("GET", "/rest/api/2/user/search",
                              params={"query": query, "maxResults": max_results})
