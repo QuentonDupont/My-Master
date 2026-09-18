@@ -26,6 +26,10 @@ LOG = log.get("jira")
 PROJECT_IN_JQL = re.compile(r"project\s*(?:=|in)\s*(\([^)]*\)|[A-Za-z0-9_\"']+)", re.I)
 KEY_RE = re.compile(r"^([A-Z][A-Z0-9]+)-\d+$")
 
+DEFAULT_SEARCH_FIELDS = ["summary", "status", "created", "updated", "reporter",
+                         "assignee", "labels", "components", "priority", "issuetype",
+                         "resolution"]
+
 
 class JiraError(RuntimeError):
     def __init__(self, status: int, url: str, body: str) -> None:
@@ -138,22 +142,28 @@ class JiraReadClient(_Base):
 
     def search(self, jql: str, fields: list[str] | None = None,
                max_results: int = 100, limit: int | None = None) -> list[dict]:
+        """Search via /search/jql.
+
+        The old /rest/api/2/search was removed by Atlassian (HTTP 410). The
+        replacement pages with an opaque `nextPageToken` and returns no total,
+        so this loops until `isLast` rather than counting up to one.
+        """
         assert_jql_scoped(jql)
         issues: list[dict] = []
-        start = 0
+        token: str | None = None
         while True:
-            page = self._request("POST", "/rest/api/2/search", body={
+            body: dict = {
                 "jql": jql,
-                "startAt": start,
                 "maxResults": max_results,
-                "fields": fields or ["summary", "status", "created", "updated",
-                                     "reporter", "assignee", "labels", "components",
-                                     "priority", "issuetype", "resolution"],
-            })
+                "fields": fields or DEFAULT_SEARCH_FIELDS,
+            }
+            if token:
+                body["nextPageToken"] = token
+            page = self._request("POST", "/rest/api/2/search/jql", body=body)
             batch = page.get("issues", [])
             issues.extend(batch)
-            start += len(batch)
-            if not batch or start >= page.get("total", 0):
+            token = page.get("nextPageToken")
+            if page.get("isLast") or not token or not batch:
                 break
             if limit and len(issues) >= limit:
                 break

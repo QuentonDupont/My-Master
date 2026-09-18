@@ -2,7 +2,7 @@ import unittest
 
 from agents.jira_leader.gates import never_touch, restate
 from core import config
-from tests.helpers import issue
+from tests.helpers import fixture_boards, issue
 
 
 def synthetic(summary: str, description: str = "") -> dict:
@@ -56,3 +56,13 @@ class SanityGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule():
+    global _BOARDS
+    _BOARDS = fixture_boards()
+    _BOARDS.__enter__()
+
+
+def tearDownModule():
+    _BOARDS.__exit__(None, None, None)

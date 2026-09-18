@@ -1,24 +1,22 @@
+# Fixture instance for the test suite ONLY. Not the live configuration —
+# tests must not break when config/boards.yml is tuned to the real Jira.
 # Boards in scope. Nothing outside this file may be queried or written to.
 intake:
   project: PESD1
   base_url: https://pomelofashion.atlassian.net
   # Tickets in this status are candidates for triage.
-  open_status: Waiting Support
+  open_status: Waiting for Support
   # Status PESD1 moves to once a clone has been created.
   dev_transition: In Development
   # Statuses that mean "still open" for duplicate detection.
   open_statuses:
-    - Waiting Support
-    - Waiting for customer
-    - To Do
-    - In progress
-    - Blocked
-    - Ready For Code Review
+    - Waiting for Support
+    - Waiting for Customer
+    - In Progress
+    - In Development
   # Custom field holding the requester email, if the instance has one.
   # Discover with: python -m core.jira_client fields --grep email
-  # PESD1 has "Requester Email" (customfield_10304) but it is populated on 0 of
-  # the last 300 tickets, so rule 1 cannot fire — the intake sheet does the work.
-  requester_email_field: ""
+  requester_email_field: customfield_10201
 
 development:
   project: PRDT

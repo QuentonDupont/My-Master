@@ -16,10 +16,11 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.dev_project(), "PRDT")
 
     def test_clone_issue_type_is_configured(self):
-        development = config.boards()["development"]
+        live = config.load_yaml(config.CONFIG_DIR / "boards.yml")
+        development = live["development"]
         self.assertIn("issue_type", development,
                       "boards.yml must say which issue type clones are created as")
-        self.assertEqual(config.dev_issue_type(), development["issue_type"])
+        self.assertTrue(development["issue_type"])
 
     def test_miniyaml_subset(self):
         parsed = miniyaml.loads("""

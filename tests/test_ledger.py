@@ -36,8 +36,8 @@ class LedgerTests(unittest.TestCase):
     def test_reprocessing_gate(self):
         """Invariant 4: only a changed hash AND the open status re-opens a ticket."""
         from core import config, ledger as L
-        open_status = config.boards()["intake"]["open_status"]
         with sandbox():
+            open_status = config.boards()["intake"]["open_status"]
             with L.Ledger() as led:
                 self.assertTrue(led.should_process("PESD1-3", "h1", open_status)[0])
                 led.claim("PESD1-3", "h1")
@@ -52,8 +52,8 @@ class LedgerTests(unittest.TestCase):
 
     def test_in_flight_tickets_are_not_reclaimed(self):
         from core import config, ledger as L
-        open_status = config.boards()["intake"]["open_status"]
         with sandbox():
+            open_status = config.boards()["intake"]["open_status"]
             with L.Ledger() as led:
                 led.claim("PESD1-4", "h1")
                 self.assertFalse(led.should_process("PESD1-4", "h2", open_status)[0])
@@ -62,8 +62,8 @@ class LedgerTests(unittest.TestCase):
     def test_released_ticket_is_retried(self):
         """A worker that crashes releases the ticket; it must come back round."""
         from core import config, ledger as L
-        open_status = config.boards()["intake"]["open_status"]
         with sandbox():
+            open_status = config.boards()["intake"]["open_status"]
             with L.Ledger() as led:
                 led.claim("PESD1-6", "h1")
                 led.transition("PESD1-6", L.NEW, last_error="worker: boom")

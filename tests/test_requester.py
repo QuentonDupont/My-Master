@@ -1,7 +1,7 @@
 import unittest
 
 from core import requester as R
-from tests.helpers import FIXTURES, issue
+from tests.helpers import FIXTURES, fixture_boards, issue
 
 SHEET = R.load_sheet(FIXTURES / "intake_sheet.csv")
 
@@ -41,3 +41,13 @@ class RequesterRuleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule():
+    global _BOARDS
+    _BOARDS = fixture_boards()
+    _BOARDS.__enter__()
+
+
+def tearDownModule():
+    _BOARDS.__exit__(None, None, None)

@@ -98,7 +98,7 @@ def run(board_id: str | None = None, sample_size: int = 25) -> Report:  # noqa: 
     for project in (intake, dev):
         try:
             issues = client.search(f"project = {project} ORDER BY created DESC",
-                                   fields=["summary", "status", "created"],
+                                   fields=["summary", "status", "created", "resolution"],
                                    limit=sample_size)
             report.add(f"project {project}", PASS,
                        f"readable, {len(issues)} recent issues sampled")
@@ -124,12 +124,21 @@ def run(board_id: str | None = None, sample_size: int = 25) -> Report:  # noqa: 
                        f"{open_status!r} not in the sample. Seen: {found}",
                        key="intake.open_status",
                        fix="set intake.open_status to the real name")
-        unknown = [s for s in statuses if s not in intake_cfg["open_statuses"]]
+        unresolved = {((i["fields"].get("status") or {}).get("name"))
+                      for i in sample if not i["fields"].get("resolution")}
+        unknown = sorted(s for s in unresolved
+                         if s and s not in intake_cfg["open_statuses"])
         if unknown:
             report.add("open_statuses", WARN,
-                       f"not listed for duplicate detection: {', '.join(unknown)}",
+                       f"unresolved tickets sit in statuses not listed: "
+                       f"{', '.join(unknown)}",
                        key="intake.open_statuses",
-                       fix="add the ones that mean 'still open'")
+                       fix="add them, or duplicate detection will miss those tickets")
+        else:
+            report.add("open_statuses", PASS,
+                       f"{len(intake_cfg['open_statuses'])} statuses cover every "
+                       f"unresolved ticket in the sample",
+                       key="intake.open_statuses")
 
     # -- requester email field --------------------------------------------
     field_id = intake_cfg.get("requester_email_field")
@@ -138,7 +147,13 @@ def run(board_id: str | None = None, sample_size: int = 25) -> Report:  # noqa: 
         by_id = {f["id"]: f["name"] for f in fields}
         candidates = [f"{f['id']} ({f['name']})" for f in fields
                       if "email" in f["name"].lower() and f["id"].startswith("custom")]
-        if field_id in by_id:
+        if not field_id:
+            report.add("requester_email_field", PASS,
+                       "not configured — requester rule 1 is off, the intake sheet "
+                       "does the work. Candidates if you want it on: "
+                       + (", ".join(candidates[:4]) or "none"),
+                       key="intake.requester_email_field")
+        elif field_id in by_id:
             populated = 0
             for issue in sample[:10]:
                 full = client.issue(issue["key"], fields=field_id)
@@ -162,20 +177,30 @@ def run(board_id: str | None = None, sample_size: int = 25) -> Report:  # noqa: 
 
     # -- transition --------------------------------------------------------
     target = intake_cfg["dev_transition"]
-    if sample:
+    probe = next((i for i in sample
+                  if ((i["fields"].get("status") or {}).get("name")) == open_status),
+                 sample[0] if sample else None)
+    if probe:
+        probe_status = ((probe["fields"].get("status") or {}).get("name"))
+        on_open = probe_status == open_status
         try:
-            available = [t["to"]["name"] for t in client.transitions(sample[0]["key"])]
-            if target in available:
+            available = [t["to"]["name"] for t in client.transitions(probe["key"])]
+            if not target:
                 report.add("dev_transition", PASS,
-                           f"{target!r} reachable from {sample[0]['key']}",
+                           "not configured — PESD1 will not be transitioned on clone",
+                           key="intake.dev_transition")
+            elif target in available:
+                report.add("dev_transition", PASS,
+                           f"{target!r} reachable from {probe['key']} ({probe_status})",
                            key="intake.dev_transition")
             else:
-                report.add("dev_transition", WARN,
-                           f"{target!r} not reachable from {sample[0]['key']} "
-                           f"(status {((sample[0]['fields'].get('status') or {}).get('name'))!r}). "
-                           f"Available: {', '.join(available) or 'none'}",
+                report.add("dev_transition", FAIL if on_open else WARN,
+                           f"{target!r} not reachable from {probe['key']} "
+                           f"(status {probe_status!r}). Available: "
+                           f"{', '.join(available) or 'none'}",
                            key="intake.dev_transition",
-                           fix="check a ticket that is actually in the open status")
+                           fix=("pick one of the available names, or set it to '' to "
+                                "leave PESD1 where it is"))
         except JiraError as exc:
             report.add("dev_transition", FAIL, str(exc)[:160])
 

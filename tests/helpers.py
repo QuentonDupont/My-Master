@@ -10,6 +10,20 @@ FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
 
 
 @contextlib.contextmanager
+def fixture_boards():
+    """Point config.boards() at the fixture instance, not the live one."""
+    from core import config
+
+    data = config.load_yaml(FIXTURES / "boards.yml")
+    saved = config.boards
+    config.boards = lambda: data
+    try:
+        yield data
+    finally:
+        config.boards = saved
+
+
+@contextlib.contextmanager
 def sandbox():
     from core import config, proposals
 
@@ -32,7 +46,8 @@ def sandbox():
                   proposals.STORE):
             d.mkdir(parents=True, exist_ok=True)
         try:
-            yield root
+            with fixture_boards():
+                yield root
         finally:
             for key, value in saved.items():
                 if key == "STORE":
