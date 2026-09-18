@@ -26,8 +26,9 @@ class FakeWriter:
         self._record("comment", key=key)
         return {"id": "c-100"}
 
-    def create_issue(self, project, summary, description, labels=None, priority=None):
-        self._record("clone", project=project)
+    def create_issue(self, project, summary, description, issue_type,
+                     labels=None, priority=None):
+        self._record("clone", project=project, issue_type=issue_type)
         return {"key": "PRDT-999"}
 
     def link_issues(self, inward, outward, link_type):
@@ -99,6 +100,17 @@ class ExecuteTests(unittest.TestCase):
                 self.assertEqual(row["state"], L.EXECUTED)
                 self.assertEqual(row["clone_key"], "PRDT-999")
                 self.assertEqual(row["comment_id"], "c-100")
+
+    def test_clone_uses_the_issue_type_from_boards_yml(self):
+        from core import config
+        with sandbox():
+            with L.Ledger() as led:
+                proposal = approved_proposal(led)
+                writer = FakeWriter()
+                E.execute_proposal(proposal.proposal_id, execute=True, ledger=led,
+                                   writer=writer, reader=FakeReader())
+                clone_call = next(c[1] for c in writer.calls if c[0] == "clone")
+                self.assertEqual(clone_call["issue_type"], config.dev_issue_type())
 
     def test_dry_run_writes_nothing_and_leaves_the_ledger_alone(self):
         with sandbox():

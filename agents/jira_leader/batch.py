@@ -112,7 +112,8 @@ def _render_item(item: dict, brief: bool = False) -> list[str]:
                 "> " + p["proposed_comment"].replace("\n", "\n> ")]
     if p["clone"] and not brief:
         c = p["clone"]
-        out += ["", f"**Clone into {c['target_project']}:** {c['summary']}", "",
+        out += ["", f"**Clone into {c['target_project']} as a "
+                    f"{config.dev_issue_type()}:** {c['summary']}", "",
                 f"- Assignee: **{c['assignee']}** — {c['assignee_reason']}",
                 f"- Alternates: {', '.join(c['assignee_alternates'])}",
                 f"- Labels: {', '.join(c['labels']) or '—'} · Priority: {c['priority']}",

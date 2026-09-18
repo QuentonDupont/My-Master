@@ -15,6 +15,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.intake_project(), "PESD1")
         self.assertEqual(config.dev_project(), "PRDT")
 
+    def test_clone_issue_type_is_configured(self):
+        development = config.boards()["development"]
+        self.assertIn("issue_type", development,
+                      "boards.yml must say which issue type clones are created as")
+        self.assertEqual(config.dev_issue_type(), development["issue_type"])
+
     def test_miniyaml_subset(self):
         parsed = miniyaml.loads("""
 a: 1

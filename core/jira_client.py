@@ -163,6 +163,16 @@ class JiraReadClient(_Base):
     def iter_search(self, jql: str, fields: list[str] | None = None) -> Iterator[dict]:
         yield from self.search(jql, fields=fields)
 
+    def issue_types(self, project: str) -> list[dict]:
+        """Issue types available in a project — use this to set boards.yml."""
+        assert_project_allowed(project)
+        meta = self._request("GET", "/rest/api/2/issue/createmeta",
+                             params={"projectKeys": project, "expand": "projects.issuetypes"})
+        for proj in meta.get("projects", []):
+            if proj.get("key") == project:
+                return proj.get("issuetypes", [])
+        return []
+
     def find_users(self, query: str, max_results: int = 10) -> list[dict]:
         return self._request("GET", "/rest/api/2/user/search",
                              params={"query": query, "maxResults": max_results})
@@ -200,7 +210,7 @@ class JiraWriteClient(_Base):
 
     # -- issues ------------------------------------------------------------
     def create_issue(self, project: str, summary: str, description: str,
-                     issue_type: str = "Task", labels: list[str] | None = None,
+                     issue_type: str, labels: list[str] | None = None,
                      priority: str | None = None) -> dict:
         assert_project_allowed(project)
         fields: dict[str, Any] = {
@@ -213,7 +223,8 @@ class JiraWriteClient(_Base):
             fields["labels"] = labels
         if priority:
             fields["priority"] = {"name": priority}
-        return self._do("create_issue", {"project": project, "summary": summary[:120]},
+        return self._do("create_issue", {"project": project, "issue_type": issue_type,
+                                         "summary": summary[:120]},
                         lambda: self._request("POST", "/rest/api/2/issue",
                                               body={"fields": fields}))
 
@@ -292,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
     p_s.add_argument("--limit", type=int, default=20)
     p_t = sub.add_parser("transitions")
     p_t.add_argument("key")
+    p_it = sub.add_parser("issue-types", help="issue types valid for a project")
+    p_it.add_argument("--project", default=config.dev_project())
     args = ap.parse_args(argv)
 
     client = JiraReadClient()
@@ -312,6 +325,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "transitions":
         for tr in client.transitions(args.key):
             print(f"{tr['id']:<6} -> {tr['to']['name']}")
+    elif args.cmd == "issue-types":
+        configured = config.dev_issue_type()
+        for it in client.issue_types(args.project):
+            mark = "  <- boards.yml" if it["name"] == configured else ""
+            print(f"{it['name']:<24} subtask={it.get('subtask')}{mark}")
     return 0
 
 

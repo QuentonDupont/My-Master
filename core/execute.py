@@ -179,9 +179,13 @@ def execute_proposal(proposal_id: str, *, execute: bool = False,
                 created = run(
                     "clone",
                     lambda: writer.create_issue(clone.target_project, clone.summary,
-                                                clone.description, labels=clone.labels,
+                                                clone.description,
+                                                issue_type=config.dev_issue_type(),
+                                                labels=clone.labels,
                                                 priority=clone.priority),
-                    {"project": clone.target_project, "summary": clone.summary[:120]},
+                    {"project": clone.target_project,
+                     "issue_type": config.dev_issue_type(),
+                     "summary": clone.summary[:120]},
                 )
                 # In a dry run there is no real key; use a placeholder so the
                 # remaining steps still run and get logged.

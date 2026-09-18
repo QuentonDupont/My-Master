@@ -66,10 +66,13 @@ what the Chief of Staff clusters into rule proposals.
 ```bash
 cp config/.env.example .env      # gitignored; fill in JIRA_EMAIL + JIRA_API_TOKEN
 python3 -m core.jira_client whoami
-python3 -m core.jira_client fields --grep email    # find requester_email_field
+python3 -m core.jira_client fields --grep email       # find requester_email_field
+python3 -m core.jira_client issue-types --project PRDT  # confirm the clone type
+python3 -m core.jira_client transitions PESD1-<key>     # confirm the status names
 ```
 
-Put the custom field id in `config/boards.yml` (`intake.requester_email_field`).
+Put the custom field id in `config/boards.yml` (`intake.requester_email_field`),
+and set `development.issue_type` to whatever PRDT actually uses for this work.
 If PESD1 carries the requester email, the Google Sheet join is unnecessary.
 
 Build the corpus, then run:

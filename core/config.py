@@ -96,6 +96,10 @@ def dev_project() -> str:
     return boards()["development"]["project"]
 
 
+def dev_issue_type() -> str:
+    return boards()["development"].get("issue_type") or "Task"
+
+
 def allowed_projects() -> list[str]:
     return list(boards()["allowed_projects"])
 
@@ -115,6 +119,7 @@ if __name__ == "__main__":  # python -m core.config
         "root": str(ROOT),
         "intake": intake_project(),
         "dev": dev_project(),
+        "dev_issue_type": dev_issue_type(),
         "allowed": allowed_projects(),
         "base_url": base_url(),
         "ledger_db": str(LEDGER_DB),
