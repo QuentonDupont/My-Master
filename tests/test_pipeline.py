@@ -54,6 +54,40 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(_title("Hello, could you please remove the IR number"),
                          "Remove the IR number")
 
+    def test_clone_description_has_the_required_structure(self):
+        from agents.jira_leader import description as D
+        with sandbox():
+            build_corpus()
+            run_queue()
+            clone = next(p.clone for p in P.load_all() if p.clone)
+            for heading in ("h2. Overview", "h2. Current result",
+                            "h2. Expected outcome", "h2. Request details",
+                            "h2. Original request (verbatim)",
+                            "h2. Related history", "h2. Where to start"):
+                self.assertIn(heading, clone.description, heading)
+            self.assertIn("{quote}", clone.description)
+
+    def test_a_screenshot_is_not_a_resolution_note(self):
+        from agents.jira_leader.description import resolution_note
+        self.assertEqual(resolution_note(
+            {"body": "the request\n\n!image-20260914-090735.png|width=780!"}), "")
+        self.assertEqual(resolution_note(
+            {"body": "the request\n\n[~accountid:abc123] ok"}), "")
+        self.assertEqual(
+            resolution_note({"body": "x\n\nRemove Item Receipt in netsuite, then "
+                                     "re-receive the order against the invoice."}),
+            "Remove Item Receipt in netsuite, then re-receive the order against "
+            "the invoice.")
+
+    def test_entities_are_the_subject_not_the_verb(self):
+        from agents.jira_leader.description import entities
+        found = entities('Add two new locations in NS - "TH Central Si Racha" '
+                         'and "TH Happitat", order 3161582')
+        self.assertIn("TH Central Si Racha", found["names"])
+        self.assertIn("TH Happitat", found["names"])
+        self.assertIn("3161582", found["references"])
+        self.assertNotIn("Add Two", found["names"])
+
     def test_never_touch_ticket_gets_no_comment_and_no_clone(self):
         with sandbox():
             build_corpus()

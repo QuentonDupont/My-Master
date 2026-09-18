@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from agents.historian.retrieval import Historian
 from agents.jira_leader import analysis as analysis_mod
+from agents.jira_leader import description as description_mod
 from agents.jira_leader.gates import never_touch, restate
 from agents.jira_leader.sources import FileTicketSource, comment_count
 from core import config, ledger as ledger_mod, log, proposals, requester as requester_mod
@@ -175,8 +176,8 @@ def process(issue: dict, *, ledger: ledger_mod.Ledger | None = None,
             clone = proposals.Clone(
                 target_project=config.dev_project(),
                 summary=analysis.clone_summary or summary,
-                description=(f"{summary}\n\n{description}".strip()
-                             + "\n\n---\n\n" + analysis.developer_summary),
+                description=description_mod.build(issue, research, analysis,
+                                                 requester),
                 assignee=first["assignee"] if first else None,
                 assignee_reason=first["reason"] if first else "",
                 assignee_alternates=[c["assignee"] for c in candidates[1:]] or

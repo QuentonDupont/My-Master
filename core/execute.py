@@ -418,6 +418,104 @@ def create_epic(summary: str, *, description: str = "", execute: bool = False,
     return result
 
 
+def redescribe_clone(ticket_key: str, *, execute: bool = False,
+                     ledger: ledger_mod.Ledger | None = None,
+                     writer: JiraWriteClient | None = None,
+                     reader: JiraReadClient | None = None) -> ExecutionResult:
+    """Rewrite an executed clone's description from the current template.
+
+    The proposal was approved; this changes how the same facts are presented to
+    the developer, not what was decided. The previous text is journalled first,
+    so `--restore` can put it back.
+    """
+    from agents.historian.retrieval import Historian
+    from agents.jira_leader import analysis as analysis_mod
+    from agents.jira_leader import description as description_mod
+    from agents.jira_leader.gates import restate
+    from core import requester as requester_mod
+
+    own_ledger = ledger is None
+    led = ledger or ledger_mod.Ledger()
+    try:
+        row = led.get(ticket_key)
+        if row is None or not row["clone_key"]:
+            raise ExecutionRefused(f"{ticket_key} has no clone to rewrite")
+        proposal = proposals.load(row["proposal_id"])
+        reader = reader or JiraReadClient()
+        writer = writer or JiraWriteClient(execute=execute)
+        issue = reader.issue(ticket_key)
+        fields = issue.get("fields", {}) or {}
+
+        with Historian() as hist:
+            research = hist.research(ticket_key, fields.get("summary") or "",
+                                     fields.get("description") or "")
+            analysis = analysis_mod.get_analyst("heuristic").analyse(
+                issue, research, restate(issue)[0] or proposal.requirement_restated,
+                analysis_mod.load_rules())
+            analysis.requirement_restated = proposal.requirement_restated
+            text = description_mod.build(issue, research, analysis,
+                                         requester_mod.resolve(issue, None))
+
+        result = ExecutionResult(proposal_id=proposal.proposal_id, ticket=ticket_key,
+                                 dry_run=not execute, clone_key=row["clone_key"])
+        previous = (reader.issue(row["clone_key"], fields="description")
+                    .get("fields", {}).get("description") or "")
+        if previous.strip() == text.strip():
+            result.steps.append(StepResult("redescribe", True, {"skipped": "unchanged"}))
+            return result
+        if execute:
+            led.journal(ticket_key, proposal.proposal_id, "redescribe.previous", True,
+                        {"clone": row["clone_key"], "description": previous})
+        try:
+            writer.set_description(row["clone_key"], text)
+            proposal.clone.description = text
+            proposals.save(proposal)
+            result.steps.append(StepResult("redescribe", True,
+                                           {"key": row["clone_key"],
+                                            "chars": len(text),
+                                            "was_chars": len(previous)}))
+            led.journal(ticket_key, proposal.proposal_id, "redescribe", True,
+                        {"clone": row["clone_key"], "chars": len(text)})
+        except Exception as exc:
+            result.ok = False
+            result.steps.append(StepResult("redescribe", False,
+                                           {"key": row["clone_key"]}, str(exc)))
+            led.record_error(ticket_key, f"redescribe: {exc}")
+        return result
+    finally:
+        if own_ledger:
+            led.close()
+
+
+def restore_description(ticket_key: str, *, execute: bool = False,
+                        ledger: ledger_mod.Ledger | None = None,
+                        writer: JiraWriteClient | None = None) -> ExecutionResult:
+    """Undo of redescribe_clone: put back the text journalled before the rewrite."""
+    own_ledger = ledger is None
+    led = ledger or ledger_mod.Ledger()
+    try:
+        row = led.get(ticket_key)
+        if row is None or not row["clone_key"]:
+            raise ExecutionRefused(f"{ticket_key} has no clone")
+        previous = None
+        for entry in led.journal_for(ticket_key):
+            if entry["step"] == "redescribe.previous" and entry["detail"]:
+                previous = json.loads(entry["detail"]).get("description")
+        if previous is None:
+            raise ExecutionRefused(f"no previous description journalled for {ticket_key}")
+        writer = writer or JiraWriteClient(execute=execute)
+        result = ExecutionResult(proposal_id=row["proposal_id"] or "", ticket=ticket_key,
+                                 dry_run=not execute, clone_key=row["clone_key"])
+        writer.restore_description(row["clone_key"], previous)
+        result.steps.append(StepResult("restore_description", True,
+                                       {"key": row["clone_key"],
+                                        "chars": len(previous)}))
+        return result
+    finally:
+        if own_ledger:
+            led.close()
+
+
 def cleanup_partial(ticket_key: str, *, execute: bool = False,
                     ledger: ledger_mod.Ledger | None = None,
                     writer: JiraWriteClient | None = None,
@@ -501,6 +599,13 @@ def main(argv: list[str] | None = None) -> int:
                             help="create the epic clones hang under (setup, one-off)")
     p_epic.add_argument("--summary", required=True)
     p_epic.add_argument("--execute", action="store_true")
+    p_re = sub.add_parser("redescribe",
+                          help="rewrite an executed clone's description")
+    p_re.add_argument("ticket")
+    p_re.add_argument("--execute", action="store_true")
+    p_rs = sub.add_parser("restore-description", help="undo of redescribe")
+    p_rs.add_argument("ticket")
+    p_rs.add_argument("--execute", action="store_true")
     p_clean = sub.add_parser("cleanup",
                              help="undo a half-finished execution so it can re-run")
     p_clean.add_argument("ticket")
@@ -514,6 +619,10 @@ def main(argv: list[str] | None = None) -> int:
             out = create_epic(args.summary, execute=args.execute)
             print(json.dumps(out, indent=2))
             return 0
+        elif args.cmd == "redescribe":
+            res = redescribe_clone(args.ticket, execute=args.execute)
+        elif args.cmd == "restore-description":
+            res = restore_description(args.ticket, execute=args.execute)
         elif args.cmd == "cleanup":
             res = cleanup_partial(args.ticket, execute=args.execute)
         else:

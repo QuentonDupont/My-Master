@@ -120,7 +120,17 @@ class Historian:
             project=config.intake_project(), statuses=open_statuses,
             exclude_refs=(exclude_ref,) if exclude_ref else (),
         )
-        return [h for h in hits if h.get("similarity", 0) >= threshold][:limit]
+        out = [h for h in hits if h.get("similarity", 0) >= threshold][:limit]
+        for doc in out:
+            doc["open_clones"] = self.open_clones(doc)
+        return out
+
+    def open_clones(self, doc: dict) -> list[dict]:
+        """The dev tickets linked to this one that are not finished."""
+        terminal = {s.lower() for s in
+                    (config.boards()["development"].get("resolved_statuses") or [])}
+        return [l for l in (doc.get("links") or [])
+                if l.get("key") and (l.get("status") or "").lower() not in terminal]
 
     def related_open_work(self, text: str, *, exclude_ref: str | None = None,
                           limit: int = 4) -> list[dict]:
@@ -145,10 +155,7 @@ class Historian:
             if not rare and doc.get("similarity", 0) < RELATED_COVERAGE:
                 continue
             doc["rare_terms"] = rare
-            doc["open_clones"] = [
-                l for l in (doc.get("links") or [])
-                if l.get("key") and (l.get("status") or "").lower() not in dev_terminal
-            ]
+            doc["open_clones"] = self.open_clones(doc)
             out.append(doc)
         # Tickets with live dev work first — that is the expensive mistake.
         out.sort(key=lambda d: (not d["open_clones"], -d.get("similarity", 0)))

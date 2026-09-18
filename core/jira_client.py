@@ -301,6 +301,15 @@ class JiraWriteClient(_Base):
         return self._do("delete_issue", {"key": key},
                         lambda: self._request("DELETE", f"/rest/api/2/issue/{key}"))
 
+    def set_description(self, key: str, description: str) -> dict:
+        assert_key_allowed(key)
+        return self._do("set_description", {"key": key, "chars": len(description)},
+                        lambda: self._request("PUT", f"/rest/api/2/issue/{key}",
+                                              body={"fields": {"description": description}}))
+
+    def restore_description(self, key: str, previous: str) -> dict:  # undo
+        return self.set_description(key, previous)
+
     # -- links -------------------------------------------------------------
     def link_issues(self, inward_key: str, outward_key: str, link_type: str) -> dict:
         assert_key_allowed(inward_key)

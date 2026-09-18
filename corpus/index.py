@@ -70,16 +70,30 @@ STOPWORDS = {
     "hello", "dear", "team", "thanks", "thank", "regards", "kindly", "can", "could",
     "would", "should", "not", "no", "yes", "has", "have", "had", "do", "does", "did",
     "there", "here", "when", "what", "which", "who", "how", "why", "our", "your",
+    # Words every second ticket on a support board carries. They describe that
+    # something was raised, never what it was about, and two tickets sharing
+    # only these are not related.
+    "issue", "issues", "problem", "problems", "request", "requests", "requested",
+    "ticket", "tickets", "support", "critical", "urgent", "asap", "need", "needs",
+    "help", "update", "updated", "check", "checking", "confirm", "pls", "hello",
+    "dear", "regards", "morning", "afternoon", "sorry", "sir", "madam", "khun",
+    "am", "an", "as", "at", "be", "by", "do", "go", "he", "if", "in", "is", "it",
+    "me", "my", "no", "of", "on", "or", "so", "to", "up", "us", "we", "id",
 }
-TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_\-]{1,}")
+TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_\-]+")
+#: Links are not subject matter. Tokenising them matched every ticket carrying a
+#: Google Drive attachment to every other one, on "drivesdk" and "usp".
+URL_RE = re.compile(r"https?://\S+|www\.\S+")
 
 
 def keywords(text: str, limit: int = 18) -> list[str]:
     """Content words, most frequent first — used to build the FTS query."""
     counts: dict[str, int] = {}
-    for tok in TOKEN_RE.findall(text or ""):
+    for tok in TOKEN_RE.findall(URL_RE.sub(" ", text or "")):
         t = tok.lower()
-        if t in STOPWORDS or len(t) < 3:
+        # Two letters is not too short here: PO, NS, WH, IR and SG are the
+        # subject of half this board's tickets.
+        if t in STOPWORDS or len(t) < 2:
             continue
         counts[t] = counts.get(t, 0) + 1
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
@@ -212,9 +226,13 @@ class Corpus:
             subject_weight = sum(self.idf(t) for t in subject) or 1.0
             cov_doc = sum(self.idf(t) for t in subject_shared) / subject_weight
             # A two-word document would otherwise match everything it mentions.
+            # One shared word is not a match. "Cancel" alone tied a purchase-order
+            # request to a payment-gateway ticket at 0.64.
             if len(subject_shared) < 2 and not any(self.is_rare_term(t)
                                                    for t in subject_shared):
                 cov_doc = 0.0
+            if len(shared) < 2 and not any(self.is_rare_term(t) for t in shared):
+                cov_query = 0.0
             doc["similarity"] = round(max(cov_query, cov_doc), 3)
             doc["shared_terms"] = sorted(shared, key=lambda t: -weights[t])[:6]
             scored.append(doc)
