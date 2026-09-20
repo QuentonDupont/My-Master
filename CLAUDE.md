@@ -29,6 +29,21 @@ Do not query, write to, or reason about any other Jira project.
 1. **No write to Jira without an approved proposal.** All writes go through
    `execute_proposal(proposal_id)`. There is no other write path. Do not add one,
    do not call the Jira write API directly from a worker, do not "just this once".
+
+   **One exception, added 20 Sep 2026 by the board owner: status mirroring**
+   (`core/status_mirror.py`). When a PRDT clone moves, its PESD1 parent is moved
+   to match, so the requester sees progress on the ticket they are watching.
+   There is nothing to propose — the decision was made when the clone was
+   approved, and this is bookkeeping after it. The exception is exactly this
+   wide and no wider:
+   - transitions only, never a comment, clone, link or assignment
+   - the PESD1 parent only, never the clone, and only to the status implied by
+     the clone recorded against it in the ledger
+   - forward along the declared order only; a parent is never moved backwards
+   - never into a closing status — invariant 9 still holds, so a clone closed as
+     Won't Do is reported for a human, not mirrored
+   - a transition the workflow does not offer is reported, never forced
+   Everything else still goes through `execute_proposal`.
 2. **No writes to Apollo or Henry. Ever.** Read-only integrations only, and only
    after they are explicitly added in a later phase. Right now: no integration at all.
 3. **Never-touch categories** are escalated to the human with no comment and no

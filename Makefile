@@ -1,4 +1,4 @@
-.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install
+.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -39,6 +39,12 @@ poll-fixtures:  ## one poller sweep against fixture history, cursor untouched
 
 poll-install:  ## install the launchd poller (refuses without an xoxb- token)
 	./tools/install_poller.sh
+
+mirror:  ## report PESD1 parents whose PRDT clone has moved on
+	python3 -m core.status_mirror report
+
+mirror-apply:  ## move those parents to match (add EXEC=--execute to write)
+	python3 -m core.status_mirror apply $(EXEC)
 
 brief:  ## morning brief
 	python3 -m agents.chief_of_staff.brief brief
