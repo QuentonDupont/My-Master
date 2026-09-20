@@ -147,3 +147,62 @@ class ExportedDecisionTests(unittest.TestCase):
                 row = led.get("PESD1-10485")
                 self.assertEqual(
                     mobile.to_document(p, "now", row)["decision"], "approve")
+
+
+class WithdrawApprovalTests(unittest.TestCase):
+    """An approval can be taken back until it is executed.
+
+    The state machine has always allowed APPROVED -> REJECTED. Nothing offered
+    it, so an approval made by mistake — a mis-tap, or a UI that looked dead and
+    got clicked twenty-six times — could only be undone by editing the ledger.
+    """
+
+    def _proposed(self, led, ticket="PESD1-10485"):
+        from core import proposals as P
+        p = P.Proposal(
+            proposal_id=P.next_id(), ticket=ticket,
+            ticket_url=f"https://example.invalid/{ticket}",
+            requirement_restated="Requester reports: something.",
+            requester=P.Requester(), classification=P.ANSWERABLE, confidence=0.9,
+            proposed_comment="An answer.", flags=["requester_unknown"])
+        P.save(p)
+        led.claim(ticket, "hash")
+        led.transition(ticket, L.PROPOSED, proposal_id=p.proposal_id)
+        return p
+
+    def test_an_approved_proposal_can_still_be_rejected(self):
+        from agents.jira_leader import mobile
+        with sandbox():
+            with L.Ledger() as led:
+                p = self._proposed(led)
+                led.transition("PESD1-10485", L.APPROVED)
+                out = mobile.apply([{"proposal_id": p.proposal_id,
+                                     "decision": "reject",
+                                     "note": "cites unrelated evidence"}], led=led)
+                self.assertEqual(out["rejected"], [p.proposal_id])
+                self.assertEqual(led.get("PESD1-10485")["state"], L.REJECTED)
+
+    def test_an_executed_proposal_cannot_be_rejected(self):
+        """It has already been posted; taking it back is not a decision."""
+        from agents.jira_leader import mobile
+        with sandbox():
+            with L.Ledger() as led:
+                p = self._proposed(led)
+                led.transition("PESD1-10485", L.APPROVED)
+                led.transition("PESD1-10485", L.EXECUTED, clone_key="PRDT-1")
+                out = mobile.apply([{"proposal_id": p.proposal_id,
+                                     "decision": "reject", "note": "too late"}],
+                                   led=led)
+                self.assertTrue(out["errors"])
+                self.assertEqual(led.get("PESD1-10485")["state"], L.EXECUTED)
+
+    def test_approving_still_requires_proposed(self):
+        """Widening applies to taking back, not to giving out."""
+        from agents.jira_leader import mobile
+        with sandbox():
+            with L.Ledger() as led:
+                p = self._proposed(led)
+                led.transition("PESD1-10485", L.REJECTED)
+                out = mobile.apply([{"proposal_id": p.proposal_id,
+                                     "decision": "approve"}], led=led)
+                self.assertTrue(out["errors"])

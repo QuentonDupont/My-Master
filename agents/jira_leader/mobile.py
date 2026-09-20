@@ -24,6 +24,12 @@ LOG = log.get("mobile")
 
 REVIEWABLE = (ledger_mod.PROPOSED,)
 
+#: An approval can be withdrawn right up until it is executed. The state machine
+#: has always allowed APPROVED -> REJECTED; nothing offered it, so an approval
+#: made by mistake could only be undone by editing the ledger. Approving still
+#: requires PROPOSED — this widens taking something back, not giving it out.
+WITHDRAWABLE = (ledger_mod.PROPOSED, ledger_mod.APPROVED, ledger_mod.CORRECTED)
+
 
 #: ledger state -> the decision a review page should show
 _DECISIONS = {
@@ -152,7 +158,8 @@ def apply(decisions: list[dict], led: ledger_mod.Ledger | None = None) -> dict:
             if row is None:
                 result["errors"].append({"proposal_id": pid, "error": "not in ledger"})
                 continue
-            if row["state"] not in REVIEWABLE:
+            allowed = WITHDRAWABLE if decision == "reject" else REVIEWABLE
+            if row["state"] not in allowed:
                 result["errors"].append({"proposal_id": pid,
                                          "error": f"ledger state is {row['state']}"})
                 continue
