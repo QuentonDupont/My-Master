@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pomelo.panel</string>
+
+  <!-- Bound to the tailnet address, deliberately not 0.0.0.0: the panel has no
+       authentication, so it must be reachable from your own devices and nothing
+       else. tools/panel_host.sh resolves the address at launch, because a
+       Tailscale IP is stable in practice but not guaranteed. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/quenton-d/My-Master/tools/panel_host.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/quenton-d/My-Master</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/quenton-d/My-Master</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>LOG_STDERR</key>
+    <string>0</string>
+  </dict>
+
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/quenton-d/My-Master/logs/panel.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/quenton-d/My-Master/logs/panel.err</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

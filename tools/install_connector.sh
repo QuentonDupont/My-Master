@@ -7,7 +7,8 @@
 # Two jobs, because they fail differently and you want to restart one without
 # the other:
 #
-#   com.pomelo.mcp      the server, bound to 127.0.0.1 only
+#   com.pomelo.mcp      the MCP server, bound to 127.0.0.1 only
+#   com.pomelo.panel    the review page, bound to the tailnet address only
 #
 # What puts it on the internet is Tailscale Funnel, which is a Tailscale service
 # rather than a process of ours — nothing to supervise, and the hostname never
@@ -23,7 +24,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOMAIN="gui/$(id -u)"
-JOBS=(com.pomelo.mcp)
+JOBS=(com.pomelo.mcp com.pomelo.panel)
 
 if [ "${1:-install}" = "remove" ]; then
   for label in "${JOBS[@]}"; do
@@ -43,6 +44,7 @@ mkdir -p "$HOME/Library/LaunchAgents" "$ROOT/logs"
 
 # Anything already running by hand would hold the port.
 pkill -f "tools.mcp_server" 2>/dev/null || true
+pkill -f "tools.panel" 2>/dev/null || true
 sleep 1
 
 for label in "${JOBS[@]}"; do
@@ -58,5 +60,6 @@ sleep 2
 echo
 "$ROOT/tools/tunnel_url.sh" || true
 echo
+echo "  panel  : http://$(tailscale ip -4 2>/dev/null | head -1):8765  (tailnet only)"
 echo "  stop everything : ./tools/install_connector.sh remove"
 echo "  off the internet, server still up : tailscale funnel --https=443 off"
