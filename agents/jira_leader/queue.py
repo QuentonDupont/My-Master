@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from agents.historian.retrieval import Historian
 from agents.jira_leader import analysis as analysis_mod, worker as worker_mod
 from agents.jira_leader.sources import (FileTicketSource, JiraTicketSource,
-                                        TicketSource, comment_count)
+                                        KeyTicketSource, TicketSource, comment_count)
 from core import ledger as ledger_mod, log, requester as requester_mod
 
 LOG = log.get("jira_leader")
@@ -94,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p_run = sub.add_parser("run", help="poll, claim and triage")
     p_run.add_argument("--file", help="offline jsonl source instead of Jira")
+    p_run.add_argument("--keys", help="comma-separated ticket keys to triage "
+                                      "regardless of their current status")
     p_run.add_argument("--sheet", help="requester intake sheet CSV")
     p_run.add_argument("--limit", type=int)
     p_run.add_argument("--workers", type=int, default=MAX_WORKERS)
@@ -107,8 +109,12 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(led.stats(), indent=2))
         return 0
 
-    source: TicketSource = (FileTicketSource(args.file) if args.file
-                            else JiraTicketSource())
+    if args.file:
+        source: TicketSource = FileTicketSource(args.file)
+    elif args.keys:
+        source = KeyTicketSource(args.keys.split(","))
+    else:
+        source = JiraTicketSource()
     summary = run(source, limit=args.limit, max_workers=args.workers,
                   analyst_kind=args.analyst, sheet_path=args.sheet)
     print(json.dumps(summary, indent=2))

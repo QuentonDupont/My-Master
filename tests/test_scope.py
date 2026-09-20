@@ -63,3 +63,35 @@ class RedactionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KeySourceScopeTests(unittest.TestCase):
+    """Triaging a named ticket must not become a way around boards.yml."""
+
+    def source(self, keys):
+        from agents.jira_leader.sources import KeyTicketSource
+
+        class NoClient:
+            def issue(self, key, fields="*all"):
+                raise AssertionError(f"should not have fetched {key}")
+
+        return KeyTicketSource(keys, client=NoClient())
+
+    def test_an_out_of_scope_key_is_refused_not_skipped(self):
+        with self.assertRaises(ValueError) as caught:
+            self.source(["BUSK-2805"])
+        self.assertIn("BUSK-2805", str(caught.exception))
+
+    def test_one_bad_key_refuses_the_whole_batch(self):
+        """Silently dropping it would triage some of what was asked for."""
+        with self.assertRaises(ValueError):
+            self.source(["PESD1-10390", "HENRY-1"])
+
+    def test_allowed_keys_are_normalised(self):
+        src = self.source([" pesd1-10390 ", "prdt-11294", ""])
+        self.assertEqual(src.keys, ["PESD1-10390", "PRDT-11294"])
+
+    def test_nothing_is_fetched_when_a_key_is_refused(self):
+        """The NoClient above asserts if any fetch happens before validation."""
+        with self.assertRaises(ValueError):
+            self.source(["APOLLO-1"])

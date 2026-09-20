@@ -44,6 +44,43 @@ class JiraTicketSource(TicketSource):
         return self.client.issue(key)
 
 
+class KeyTicketSource(TicketSource):
+    """Named tickets, whatever lane they are sitting in.
+
+    The intake source only sees `open_status`, which is right for the standing
+    poll: a ticket someone already moved on is not new work. But it means a
+    ticket parked in Blocked can never be looked at again, and PESD1 has eleven
+    of those, the oldest untouched for 454 days — several needing an answer
+    rather than a developer.
+
+    Scope is unchanged: keys outside allowed_projects are refused here, not
+    filtered quietly, because asking for one is a mistake worth seeing.
+    """
+
+    def __init__(self, keys: list[str], client: JiraReadClient | None = None) -> None:
+        allowed = set(config.allowed_projects())
+        self.keys = [k.strip().upper() for k in keys if k.strip()]
+        bad = [k for k in self.keys if k.split("-")[0] not in allowed]
+        if bad:
+            raise ValueError(
+                f"out of scope: {', '.join(bad)} — boards.yml allows "
+                f"{', '.join(sorted(allowed))}")
+        self.client = client or JiraReadClient()
+
+    def open_tickets(self) -> list[dict]:
+        issues = []
+        for key in self.keys:
+            try:
+                issues.append(self.client.issue(key))
+            except Exception as exc:
+                LOG.warn("source.key_failed", ticket=key, error=str(exc)[:120])
+        LOG.info("source.keys", requested=len(self.keys), found=len(issues))
+        return issues
+
+    def get(self, key: str) -> dict:
+        return self.client.issue(key)
+
+
 class FileTicketSource(TicketSource):
     """Offline source. Also used by the tests."""
 
