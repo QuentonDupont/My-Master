@@ -327,11 +327,31 @@ SHIM = """
 window.claude = window.claude || {};
 window.claude.use = async function (name) {
   if (name !== "db") return null;
-  const load = async () => (await fetch("/api/collections")).json();
+  const load = async () => (await fetch("/api/collections")).text();
   const subs = [];
   let cache = {};
-  const push = async () => {
-    try { cache = await load(); } catch (e) { return; }
+  let lastRaw = null;
+
+  // The page re-renders by replacing innerHTML, and unsaved text lives only on
+  // the JavaScript objects a snapshot replaces. So a snapshot delivered while
+  // someone is typing throws away what they typed and the focus with it — the
+  // card appears to close mid-sentence. Two guards, both necessary:
+  const typing = () => {
+    const el = document.activeElement;
+    return !!el && /^(TEXTAREA|INPUT|SELECT)$/.test(el.tagName);
+  };
+
+  const push = async (force) => {
+    // 1. never interrupt someone mid-edit
+    if (!force && typing()) return;
+    let raw;
+    try { raw = await load(); } catch (e) { return; }
+    // 2. and say nothing at all when nothing actually changed, which is the
+    //    usual case on a 4s poll
+    if (!force && raw === lastRaw) return;
+    if (!force && typing()) return;        // focus may have moved while we waited
+    lastRaw = raw;
+    try { cache = JSON.parse(raw); } catch (e) { return; }
     for (const [coll, fn] of subs) {
       const docs = (cache[coll] || []).map(d => ({
         id: d.id, exists: true, data: () => d.data,
@@ -341,8 +361,8 @@ window.claude.use = async function (name) {
           docChanges: () => [], metadata: {fromCache: false}});
     }
   };
-  setInterval(push, 4000);
-  setTimeout(push, 0);
+  setInterval(() => push(false), 4000);
+  setTimeout(() => push(true), 0);
   return {
     collection: (coll) => ({
       onSnapshot: (next, _err) => { subs.push([coll, next]); push(); return () => {}; },
@@ -355,7 +375,8 @@ window.claude.use = async function (name) {
         });
         if (!res.ok) throw Object.assign(new Error("write failed"),
                                          {code: "unavailable"});
-        await push();
+        lastRaw = null;          // a decision always changes something
+        await push(true);
       },
     }),
   };
