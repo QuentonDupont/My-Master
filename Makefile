@@ -40,10 +40,10 @@ poll-fixtures:  ## one poller sweep against fixture history, cursor untouched
 poll-install:  ## install the launchd poller (refuses without an xoxb- token)
 	./tools/install_poller.sh
 
-connector-install:  ## keep the MCP server + tunnel running across reboots
+connector-install:  ## keep the MCP server running across reboots
 	./tools/install_connector.sh
 
-connector-url:  ## the URL to paste into the Claude app right now
+connector-url:  ## the permanent connector URL, and whether it answers
 	./tools/tunnel_url.sh
 
 mcp:  ## MCP server for the Claude app connector (needs MCP_AUTH_TOKEN)

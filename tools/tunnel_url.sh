@@ -1,23 +1,32 @@
 #!/bin/bash
-# The connector URL currently in force.
+# The connector URL. Permanent, via Tailscale Funnel.
 #
-# A quick tunnel gets a new hostname every time cloudflared restarts, so this
-# reads the newest one out of the log rather than remembering a stale one. Run
-# it whenever the Claude app stops reaching the connector.
+# Funnel is a Tailscale service, not a process of ours, so there is nothing to
+# keep alive and the hostname never changes — unlike the cloudflared quick
+# tunnel this replaced, which minted a new URL on every restart.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOG="$ROOT/logs/tunnel.out"
+URL="$(tailscale status --json 2>/dev/null \
+  | python3 -c "import json,sys; print('https://'+(json.load(sys.stdin).get('Self') or {}).get('DNSName','').rstrip('.'))" 2>/dev/null)"
 
-[ -f "$LOG" ] || { echo "no tunnel log yet — is com.pomelo.tunnel running?"; exit 1; }
+[ -n "${URL:-}" ] && [ "$URL" != "https://" ] || {
+  echo "Tailscale is not up:  tailscale up"; exit 1; }
 
-URL="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG" | tail -1)"
-[ -n "$URL" ] || { echo "no URL in $LOG yet; give cloudflared a few seconds"; exit 1; }
+# Captured, not piped: `grep -q` exits on first match, the writer takes SIGPIPE
+# and dies 141, and pipefail then reports a successful match as a failure.
+SERVE="$(tailscale serve status 2>/dev/null)"
+case "$SERVE" in
+  *"Funnel on"*) ;;
+  *) echo "$URL"
+     echo "  Funnel is OFF — turn it back on with:  tailscale funnel --bg 8766"
+     exit 1;;
+esac
 
-if curl -fsS -o /dev/null -w '' "$URL/health" 2>/dev/null; then
+if curl -fsS -o /dev/null --max-time 20 "$URL/health" 2>/dev/null; then
   STATE="reachable"
 else
-  STATE="NOT reachable — the tunnel may have restarted onto a new URL"
+  STATE="not answering — is com.pomelo.mcp running?"
 fi
 
 echo "$URL"
