@@ -202,6 +202,7 @@ SWIPE = """
   var THRESHOLD = 96;      // px of travel before a swipe counts
   var SLOP = 12;           // px before we decide horizontal vs vertical
   var card = null, x0 = 0, y0 = 0, dx = 0, locked = null, hints = null;
+  var swallowClick = false;
 
   function decided(el) { return el.getAttribute("data-decided") === "true"; }
 
@@ -217,8 +218,10 @@ SWIPE = """
   document.addEventListener("touchstart", function (e) {
     var el = e.target.closest && e.target.closest("article.card");
     if (!el || decided(el)) return;
-    // Let the controls themselves win: a tap on a button is not a swipe.
-    if (e.target.closest("button, textarea, select, a")) return;
+    // The card header is itself a <button data-toggle>, and it is most of a
+    // collapsed card — bailing on every button meant bailing on every swipe.
+    // Only the real controls opt out.
+    if (e.target.closest(".btn, .chip, .variant, textarea, select, a")) return;
     card = el; x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
     dx = 0; locked = null;
     hints = addHints(el);
@@ -260,6 +263,7 @@ SWIPE = """
   document.addEventListener("touchend", function () {
     if (!card || locked !== "x") { reset(); return; }
     var el = card, travelled = dx;
+    swallowClick = Math.abs(travelled) > SLOP;
     if (travelled > THRESHOLD) {
       var approve = el.querySelector('[data-act="approve"]');
       if (approve) approve.click();
@@ -281,6 +285,17 @@ SWIPE = """
   }, {passive: true});
 
   document.addEventListener("touchcancel", reset, {passive: true});
+
+  // A swipe that began on the header would otherwise finish as a tap and
+  // toggle the card open or shut. Swallow that one click.
+  document.addEventListener("click", function (e) {
+    if (!swallowClick) return;
+    swallowClick = false;
+    if (e.target.closest("[data-toggle]")) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
 })();
 </script>
 """
