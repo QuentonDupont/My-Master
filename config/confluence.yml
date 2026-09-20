@@ -13,8 +13,27 @@ spaces:
     # Pages per space. Raise it when the corpus proves useful; each page is one
     # extra API call to fetch its body.
     limit: 400
+  # Added 20 Sep 2026. An inventory/order-management question used to return
+  # "2019 - PM Daily Notes" at 0.36 similarity: the operational procedures were
+  # never in the corpus. PSD, the space this system is named for, holds 2 pages.
+  - key: OP
+    name: Operations
+    # 554 pages today — fulfilment SOPs, omnichannel operations, Malaysia
+    # delivery. This is where "how do we actually do it" is written down.
+    limit: 600
+  - key: NEON
+    name: NEON
+    # Inventory sync: current workflow, marketplace product/inventory sync.
+    # 146 pages today; headroom so growth does not silently truncate the export.
+    limit: 400
+  - key: MUL
+    name: Multivac
+    # 153 pages today.
+    limit: 400
 
 # Candidates not indexed yet — add them when you want them in scope:
 #   DO   DevOps
 #   PRA  Pomelo Retail API
 #   POMQ PomQ
+#   IS   Information Security (asset and stock inventory lists)
+#   BI   Business Intelligence (MY CDC inventory analysis)

@@ -40,14 +40,34 @@ def export_jira(project: str, months: int = 18, limit: int | None = None) -> int
     return len(issues)
 
 
+#: used only for a space with no `limit` in config/confluence.yml
+DEFAULT_PAGE_LIMIT = 200
+
+
+def space_specs(space_key: str | None = None) -> list[dict]:
+    """The spaces to export, each carrying its configured limit.
+
+    A named space keeps the limit set for it in config/confluence.yml. Before
+    this, `--space OP` built its own spec with `limit: None`, so the configured
+    600 was never consulted and OP was silently capped at the 200 default —
+    exporting 125 of 554 pages while reporting success.
+    """
+    configured = {s.get("key"): s for s in
+                  (config.confluence().get("spaces") or []) if s.get("key")}
+    if not space_key:
+        return list(configured.values())
+    spec = dict(configured.get(space_key) or {})
+    spec["key"] = space_key
+    return [spec]
+
+
 def export_confluence(space_key: str | None = None,
                       limit: int | None = None) -> int:
     """Export Confluence pages as corpus documents. Read-only."""
     from core.confluence_client import ConfluenceReadClient, to_text
 
     client = ConfluenceReadClient()
-    wanted = ([{"key": space_key, "limit": limit}] if space_key
-              else (config.confluence().get("spaces") or []))
+    wanted = space_specs(space_key)
     RAW.mkdir(parents=True, exist_ok=True)
     total = 0
     for spec in wanted:
@@ -56,7 +76,7 @@ def export_confluence(space_key: str | None = None,
         if not space:
             LOG.warn("confluence.space_missing", space=key)
             continue
-        cap = limit or spec.get("limit") or 200
+        cap = limit or spec.get("limit") or DEFAULT_PAGE_LIMIT
         pages = client.pages(space["id"], limit=cap)
         out = RAW / f"confluence_{key.lower()}.jsonl"
         written = 0
