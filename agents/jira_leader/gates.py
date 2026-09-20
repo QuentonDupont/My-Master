@@ -40,6 +40,15 @@ PROBLEM_SIGNALS = (
     "timeout", "crash", "mismatch", "did not", "didn't", "no longer",
     "not received", "not arrived", "has not", "hasn't", "haven't", "never received",
 )
+#: "not syncing", "not loading", "not saving" — the phrase list had "not
+#: working", "not showing" and "not updating" but the pattern is general: a
+#: negated action is a reported problem whatever the verb. PESD1-11282, "The
+#: return order is not syncing.", escalated as "no reported problem" because
+#: that exact phrase was missing.
+NEGATED_ACTION = re.compile(
+    r"\b(?:not|isn't|aren't|wasn't|weren't|won't|doesn't|don't|didn't)\s+"
+    r"(?:\w+\s+){0,2}?\w+(?:ing|ed|s)?\b", re.I)
+
 QUESTION_WORDS = ("how", "where", "what", "which", "who", "when", "why")
 
 #: A yes/no question opens with an auxiliary or a modal instead of a wh-word.
@@ -118,6 +127,8 @@ def restate(issue: dict) -> tuple[str | None, str]:
     lower = blob.lower()
     verbs = [w for w in words if w in REQUEST_VERBS]
     problems = [p for p in PROBLEM_SIGNALS if p in lower]
+    if not problems and NEGATED_ACTION.search(lower):
+        problems = ["negated action"]
     asking = asks_something(blob)
     polite = bool(REQUEST_PATTERNS.search(lower))
     if not (verbs or problems or asking or polite):

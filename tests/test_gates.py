@@ -119,3 +119,52 @@ class YesNoQuestionTests(unittest.TestCase):
         with fixture_boards():
             requirement, reason = gates.restate(issue)
         self.assertIsNotNone(requirement, reason)
+
+
+class NegatedActionTests(unittest.TestCase):
+    """A negated action is a reported problem, whatever the verb.
+
+    PESD1-11282 — "The return order is not syncing." — escalated as "no request
+    and no reported problem" because PROBLEM_SIGNALS listed "not working",
+    "not showing" and "not updating" but not this one. Enumerating phrases loses
+    to the next verb every time.
+    """
+
+    def restate(self, summary, description=""):
+        from agents.jira_leader import gates
+        from tests.helpers import fixture_boards
+        issue = {"fields": {"summary": summary, "description": description,
+                            "labels": [], "components": []}}
+        with fixture_boards():
+            return gates.restate(issue)
+
+    def test_the_ticket_that_exposed_this_now_restates(self):
+        requirement, reason = self.restate("The return order is not syncing.")
+        self.assertIsNotNone(requirement, reason)
+
+    def test_other_negated_actions_read_as_problems(self):
+        from agents.jira_leader.gates import NEGATED_ACTION
+        for text in ("the page is not loading on mobile",
+                     "stock is not updating after the bulk import",
+                     "the invoice does not generate",
+                     "the webhook isn't firing",
+                     "the export didn't complete"):
+            self.assertTrue(NEGATED_ACTION.search(text), text)
+
+    def test_a_plain_request_is_not_a_problem_report(self):
+        from agents.jira_leader.gates import NEGATED_ACTION
+        for text in ("please add two new locations in NS",
+                     "update the unit cost and total amount"):
+            self.assertFalse(NEGATED_ACTION.search(text), text)
+
+    def test_the_known_false_positive_is_accepted_deliberately(self):
+        """"not planning to" reads as a negated action and passes the gate.
+
+        This is the chosen trade-off: passing gate 2 only means the requirement
+        can be stated. Never-touch still runs, the Historian still has to find
+        something, and a human still approves. A false positive costs a proposal
+        someone rejects; a false negative loses a real bug report in the
+        escalation pile, which is what PESD1-11282 did for two days.
+        """
+        from agents.jira_leader.gates import NEGATED_ACTION
+        self.assertTrue(NEGATED_ACTION.search("we are not planning to do this"))
