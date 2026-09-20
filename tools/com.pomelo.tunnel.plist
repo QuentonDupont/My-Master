@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pomelo.tunnel</string>
+
+  <!-- A quick tunnel: no Cloudflare account needed, but a NEW URL every time
+       this restarts. Read the current one out of logs/tunnel.out and re-point
+       the connector. For a URL that survives restarts, run
+       `cloudflared tunnel login` and switch this to `tunnel run <name>`. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/cloudflared</string>
+    <string>tunnel</string>
+    <string>--url</string>
+    <string>http://127.0.0.1:8766</string>
+    <string>--no-autoupdate</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/quenton-d/My-Master</string>
+
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- cloudflared prints the assigned URL on startup; that is why this log
+       matters more than most. tools/tunnel_url.sh reads it back out. -->
+  <key>StandardOutPath</key>
+  <string>/Users/quenton-d/My-Master/logs/tunnel.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/quenton-d/My-Master/logs/tunnel.out</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

@@ -1,4 +1,4 @@
-.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels tick tick-install mcp
+.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels tick tick-install mcp connector-install connector-url
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -39,6 +39,12 @@ poll-fixtures:  ## one poller sweep against fixture history, cursor untouched
 
 poll-install:  ## install the launchd poller (refuses without an xoxb- token)
 	./tools/install_poller.sh
+
+connector-install:  ## keep the MCP server + tunnel running across reboots
+	./tools/install_connector.sh
+
+connector-url:  ## the URL to paste into the Claude app right now
+	./tools/tunnel_url.sh
 
 mcp:  ## MCP server for the Claude app connector (needs MCP_AUTH_TOKEN)
 	python3 -m tools.mcp_server --host $(or $(HOST),127.0.0.1)
