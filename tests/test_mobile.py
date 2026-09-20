@@ -96,3 +96,54 @@ class MobileBridgeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExportedDecisionTests(unittest.TestCase):
+    """The exported document must say what the ledger says.
+
+    It used to hardcode "pending". Harmless while the review page kept its own
+    copy of decisions; wrong the moment anything re-exports on a poll, because
+    every refresh reported an already decided proposal as still waiting — so
+    approving in the panel looked like it did nothing at all.
+    """
+
+    def test_each_ledger_state_maps_to_what_a_reviewer_should_see(self):
+        from agents.jira_leader.mobile import _decision_of
+        from core import ledger as L
+        self.assertEqual(_decision_of({"state": L.PROPOSED}), "pending")
+        self.assertEqual(_decision_of({"state": L.ESCALATED}), "pending")
+        self.assertEqual(_decision_of({"state": L.APPROVED}), "approve")
+        self.assertEqual(_decision_of({"state": L.CORRECTED}), "approve")
+        self.assertEqual(_decision_of({"state": L.EXECUTED}), "approve")
+        self.assertEqual(_decision_of({"state": L.REJECTED}), "reject")
+
+    def test_an_unknown_or_missing_row_is_pending(self):
+        from agents.jira_leader.mobile import _decision_of
+        self.assertEqual(_decision_of(None), "pending")
+        self.assertEqual(_decision_of({}), "pending")
+        self.assertEqual(_decision_of({"state": "SOMETHING_NEW"}), "pending")
+
+    def test_an_approved_proposal_exports_as_approved(self):
+        from agents.jira_leader import mobile
+        from core import ledger as L, proposals as P
+        from tests.helpers import sandbox
+        with sandbox():
+            with L.Ledger() as led:
+                p = P.Proposal(
+                    proposal_id=P.next_id(), ticket="PESD1-10485",
+                    ticket_url="https://example.invalid/PESD1-10485",
+                    requirement_restated="Requester reports: something.",
+                    requester=P.Requester(), classification=P.ANSWERABLE,
+                    confidence=0.9, proposed_comment="An answer.",
+                    flags=["requester_unknown"])
+                P.save(p)
+                led.claim("PESD1-10485", "hash")
+                led.transition("PESD1-10485", L.PROPOSED,
+                               proposal_id=p.proposal_id)
+                row = led.get("PESD1-10485")
+                self.assertEqual(
+                    mobile.to_document(p, "now", row)["decision"], "pending")
+                led.transition("PESD1-10485", L.APPROVED)
+                row = led.get("PESD1-10485")
+                self.assertEqual(
+                    mobile.to_document(p, "now", row)["decision"], "approve")

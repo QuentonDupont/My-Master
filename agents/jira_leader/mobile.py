@@ -25,6 +25,19 @@ LOG = log.get("mobile")
 REVIEWABLE = (ledger_mod.PROPOSED,)
 
 
+#: ledger state -> the decision a review page should show
+_DECISIONS = {
+    ledger_mod.APPROVED: "approve",
+    ledger_mod.CORRECTED: "approve",
+    ledger_mod.EXECUTED: "approve",
+    ledger_mod.REJECTED: "reject",
+}
+
+
+def _decision_of(row: dict | None) -> str:
+    return _DECISIONS.get((row or {}).get("state", ""), "pending")
+
+
 def to_document(proposal: proposals.Proposal, stamp: str,
                 row: dict | None = None) -> dict:
     """One proposal, shaped for the review page."""
@@ -53,7 +66,12 @@ def to_document(proposal: proposals.Proposal, stamp: str,
             "alternates": clone["assignee_alternates"],
         },
         "transition": d["pesd1_transition"] or "",
-        "decision": "pending",
+        # Derived from the ledger, not hardcoded. This used to always say
+        # "pending", which was harmless when the page kept decisions in its own
+        # store and read them back separately — and wrong the moment anything
+        # re-exports on a poll, because every refresh reported an already
+        # decided proposal as still waiting.
+        "decision": _decision_of(row),
         "note": "",
         "assignee_override": None,
         "decided_at": None,
