@@ -1,4 +1,4 @@
-.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply
+.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -39,6 +39,12 @@ poll-fixtures:  ## one poller sweep against fixture history, cursor untouched
 
 poll-install:  ## install the launchd poller (refuses without an xoxb- token)
 	./tools/install_poller.sh
+
+panel:  ## review page served from this machine (add HOST=0.0.0.0 for your phone)
+	python3 -m tools.panel --host $(or $(HOST),127.0.0.1)
+
+labels:  ## read triage-approved / triage-rejected labels off the board
+	python3 -m agents.jira_leader.labels poll $(APPLY)
 
 mirror:  ## report PESD1 parents whose PRDT clone has moved on
 	python3 -m core.status_mirror report
