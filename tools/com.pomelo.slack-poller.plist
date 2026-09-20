@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pomelo.slack-poller</string>
+
+  <!-- Absolute paths only: launchd runs with a minimal environment and no shell
+       profile, so `python3` on its own will not resolve. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>-m</string>
+    <string>agents.slack_leader.poller</string>
+    <string>once</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/quenton-d/My-Master</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/quenton-d/My-Master</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+
+  <!-- Every 3 minutes. A mention waits at most that long to become a proposal. -->
+  <key>StartInterval</key>
+  <integer>180</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- One sweep at a time. A slow sweep must not stack up behind itself. -->
+  <key>AbandonProcessGroup</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/quenton-d/My-Master/logs/poller.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/quenton-d/My-Master/logs/poller.err</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

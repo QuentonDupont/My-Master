@@ -33,8 +33,11 @@ class SlackError(RuntimeError):
 
 
 class _Base:
+    #: which env var this class takes its token from
+    TOKEN_ENV = "SLACK_BOT_TOKEN"
+
     def __init__(self, token: str | None = None, timeout: int = 30) -> None:
-        self.token = token if token is not None else config.env("SLACK_BOT_TOKEN")
+        self.token = token if token is not None else config.env(self.TOKEN_ENV)
         self.timeout = timeout
 
     def _call(self, method: str, params: dict | None = None,
@@ -63,10 +66,68 @@ class _Base:
 
 
 class SlackReadClient(_Base):
-    """Read-only. Nothing here posts, edits or deletes."""
+    """Read-only. Nothing here posts, edits or deletes.
+
+    Prefers `SLACK_USER_TOKEN` (xoxp-) when one is set, falling back to the bot
+    token. A user token reads as the person who authorised it: their channels and
+    their DMs, and `auth_test()` returns *their* user id — which is what makes
+    "someone tagged me" visible at all. A bot can only ever see channels it was
+    invited to and can never see a person's DMs.
+
+    Reading as a person and posting as one are different risks, so they use
+    different credentials: `SlackWriteClient` stays on the bot token and will
+    refuse a user token outright.
+    """
+
+    TOKEN_ENV = "SLACK_USER_TOKEN"
+
+    def __init__(self, token: str | None = None, timeout: int = 30) -> None:
+        if token is None:
+            token = config.env("SLACK_USER_TOKEN") or config.env("SLACK_BOT_TOKEN")
+        super().__init__(token, timeout)
+
+    @property
+    def acting_as_user(self) -> bool:
+        return (self.token or "").startswith("xoxp-")
 
     def auth_test(self) -> dict:
         return self._call("auth.test")
+
+    def conversations(self,
+                      types: str = "public_channel,private_channel,im,mpim",
+                      limit: int = 200) -> list[dict]:
+        """Conversations the token can see.
+
+        DMs (`im`) and group DMs (`mpim`) are included: with a user token those
+        are where most things addressed to a person actually arrive.
+        """
+        out: list[dict] = []
+        cursor = None
+        while True:
+            params = {"types": types, "limit": limit, "exclude_archived": "true"}
+            if cursor:
+                params["cursor"] = cursor
+            page = self._call("users.conversations", params=params)
+            out.extend(page.get("channels", []))
+            cursor = (page.get("response_metadata") or {}).get("next_cursor")
+            if not cursor:
+                return out
+
+    def history(self, channel: str, oldest: str | None = None,
+                limit: int = 50) -> list[dict]:
+        """Recent messages in one channel, oldest first.
+
+        `oldest` is exclusive on Slack's side, so a stored cursor is never
+        re-delivered. One page only: the poller runs often, and a channel that
+        outruns the page between sweeps is caught by the ledger, not by paging
+        back through history.
+        """
+        params: dict = {"channel": channel, "limit": limit, "inclusive": "false"}
+        if oldest:
+            params["oldest"] = oldest
+        page = self._call("conversations.history", params=params)
+        return sorted(page.get("messages", []),
+                      key=lambda m: float(m.get("ts", 0)))
 
     def thread(self, channel: str, thread_ts: str, limit: int = 100) -> list[dict]:
         """Every message in one thread, oldest first."""
@@ -96,10 +157,21 @@ class SlackReadClient(_Base):
 
 
 class SlackWriteClient(_Base):
-    """Every method is a no-op unless execute=True. Every method has an undo."""
+    """Every method is a no-op unless execute=True. Every method has an undo.
+
+    Always the bot token, never a user token: a reply posted with `xoxp-` is
+    indistinguishable from the person typing it, with no app attribution and no
+    separate entry in the audit log. If posting as the human is wanted, it goes
+    through the approver's own client (see `core.slack_execute`), not from here.
+    """
+
+    TOKEN_ENV = "SLACK_BOT_TOKEN"
 
     def __init__(self, *args, execute: bool = False, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        if (self.token or "").startswith("xoxp-"):
+            raise SlackError("init", "refusing to post with a user token; "
+                                     "SlackWriteClient uses SLACK_BOT_TOKEN")
         self.execute = bool(execute)
         self.performed: list[dict] = []
 
@@ -151,8 +223,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "whoami":
             me = client.auth_test()
-            print(json.dumps({k: me.get(k) for k in
-                              ("team", "user", "bot_id", "user_id", "url")}, indent=2))
+            out = {k: me.get(k) for k in
+                   ("team", "user", "bot_id", "user_id", "url")}
+            out["token"] = "SLACK_USER_TOKEN (acting as the person)" \
+                if client.acting_as_user else "SLACK_BOT_TOKEN (acting as the app)"
+            print(json.dumps(out, indent=2))
         else:
             for msg in client.thread(args.channel, args.ts):
                 print(f"{msg.get('ts')}  {msg.get('user') or msg.get('bot_id')}: "

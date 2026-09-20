@@ -1,4 +1,4 @@
-.PHONY: help test demo demo-reset queue batch brief rules clean
+.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -28,6 +28,17 @@ batch:  ## assemble the approval batch
 
 slack:  ## triage Slack mentions (offline fixtures)
 	python3 -m agents.slack_leader.leader run --file tests/fixtures/mentions.json
+
+poll:  ## one poller sweep (live; needs SLACK_BOT_TOKEN)
+	python3 -m agents.slack_leader.poller once
+
+poll-fixtures:  ## one poller sweep against fixture history, cursor untouched
+	python3 -m agents.slack_leader.poller once \
+		--history tests/fixtures/slack_history.json \
+		--lookback 1000000000 --no-commit
+
+poll-install:  ## install the launchd poller (refuses without an xoxb- token)
+	./tools/install_poller.sh
 
 brief:  ## morning brief
 	python3 -m agents.chief_of_staff.brief brief

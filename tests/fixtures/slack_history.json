@@ -1,0 +1,94 @@
+{
+  "bot_user_id": "UBOT",
+  "channels": [
+    {
+      "id": "C0MERCH",
+      "name": "merchandising"
+    },
+    {
+      "id": "C0CS",
+      "name": "customer-support"
+    },
+    {
+      "id": "C0QUIET",
+      "name": "eng-random"
+    },
+    {
+      "id": "D0SABARI",
+      "name": "DM with Sabari",
+      "is_im": true
+    }
+  ],
+  "users": {
+    "U400": {
+      "name": "merch",
+      "profile": {
+        "real_name": "Merch Team"
+      }
+    },
+    "U200": {
+      "name": "cs",
+      "profile": {
+        "real_name": "CS Team"
+      }
+    },
+    "U500": {
+      "name": "dev",
+      "profile": {
+        "real_name": "Bikesh"
+      }
+    },
+    "UBOT": {
+      "name": "triage-bot",
+      "profile": {
+        "real_name": "Triage Bot"
+      }
+    },
+    "U02RH": {
+      "name": "sabari",
+      "profile": {
+        "real_name": "Sabari Nath"
+      }
+    }
+  },
+  "messages": {
+    "C0MERCH": [
+      {
+        "ts": "1726400000.001",
+        "user": "U400",
+        "text": "morning all, starting the merchandising review now"
+      },
+      {
+        "ts": "1726400100.002",
+        "user": "U400",
+        "text": "<@UBOT> where do I find the daily order report? I need the export for the merchandising review"
+      }
+    ],
+    "C0CS": [
+      {
+        "ts": "1726400200.003",
+        "user": "U200",
+        "text": "<@UBOT> can you process the refund for order TH-993120 again? the customer says it never arrived"
+      }
+    ],
+    "C0QUIET": [
+      {
+        "ts": "1726400300.004",
+        "user": "U500",
+        "text": "deploying the api now, no mention here so the poller should ignore it"
+      },
+      {
+        "ts": "1726400400.005",
+        "user": "UBOT",
+        "text": "<@UBOT> a message from the bot itself, mentioning itself \u2014 must never be worked"
+      }
+    ],
+    "D0SABARI": [
+      {
+        "ts": "1726400500.006",
+        "user": "U02RH",
+        "text": "<@UBOT> bro is the 12-26 in the pre-order design a real date range?"
+      }
+    ]
+  }
+}
