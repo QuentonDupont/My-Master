@@ -42,6 +42,10 @@ def _run_one(issue: dict, analyst_kind: str, sheet: list[dict], rules: str) -> d
 def run(source: TicketSource, *, limit: int | None = None,
         max_workers: int = MAX_WORKERS, analyst_kind: str = "auto",
         sheet_path: str | None = None) -> dict:
+    # Fail before touching the board: an unusable analyst found halfway through
+    # a run leaves some tickets claimed and unprocessed.
+    analysis_mod.get_analyst(analyst_kind)
+
     issues = source.open_tickets()
     if limit:
         issues = issues[:limit]

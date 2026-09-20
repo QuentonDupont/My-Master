@@ -383,10 +383,31 @@ class ClaudeAnalyst:
             return analysis
 
 
+class AnalystUnavailable(RuntimeError):
+    """Asked for Claude explicitly, and it cannot run."""
+
+
 def get_analyst(kind: str = "auto"):
+    """`auto` degrades quietly; `claude` does not.
+
+    ClaudeAnalyst keeps a HeuristicAnalyst as a fallback and swallows failures,
+    so asking for it without a key used to run the heuristic and label the
+    result "via claude" — a batch you would read believing a model wrote it.
+    An explicit choice now fails loudly; only `auto` is allowed to degrade, and
+    it reports the analyst it actually used.
+    """
     if kind == "heuristic":
         return HeuristicAnalyst()
     if kind == "claude":
+        if not ClaudeAnalyst.available():
+            try:
+                import anthropic  # noqa: F401
+                why = "ANTHROPIC_API_KEY is not set in .env"
+            except ImportError:
+                why = "the anthropic package is not installed"
+            raise AnalystUnavailable(
+                f"--analyst claude was asked for but {why}. Use --analyst auto "
+                "to fall back to the heuristic on purpose.")
         return ClaudeAnalyst()
     return ClaudeAnalyst() if ClaudeAnalyst.available() else HeuristicAnalyst()
 

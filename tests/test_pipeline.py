@@ -229,3 +229,39 @@ class PipelineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnalystSelectionTests(unittest.TestCase):
+    """`auto` may degrade; an explicit choice may not degrade silently."""
+
+    def _no_key(self):
+        from core import config
+        saved = config.env
+        config.env = lambda n, d=None, **k: ("" if n == "ANTHROPIC_API_KEY"
+                                             else saved(n, d, **k))
+        return saved
+
+    def test_explicit_claude_refuses_when_it_cannot_run(self):
+        from agents.jira_leader import analysis
+        saved = self._no_key()
+        try:
+            with self.assertRaises(analysis.AnalystUnavailable) as caught:
+                analysis.get_analyst("claude")
+            self.assertIn("ANTHROPIC_API_KEY", str(caught.exception))
+        finally:
+            from core import config
+            config.env = saved
+
+    def test_auto_falls_back_and_says_so(self):
+        from agents.jira_leader import analysis
+        saved = self._no_key()
+        try:
+            a = analysis.get_analyst("auto")
+            self.assertEqual(a.name, "heuristic")
+        finally:
+            from core import config
+            config.env = saved
+
+    def test_heuristic_is_always_available(self):
+        from agents.jira_leader import analysis
+        self.assertEqual(analysis.get_analyst("heuristic").name, "heuristic")
