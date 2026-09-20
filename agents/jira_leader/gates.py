@@ -42,6 +42,17 @@ PROBLEM_SIGNALS = (
 )
 QUESTION_WORDS = ("how", "where", "what", "which", "who", "when", "why")
 
+#: A yes/no question opens with an auxiliary or a modal instead of a wh-word.
+#: Jira prose asks with "how do I…"; Slack asks "is it possible…?", "are you
+#: joining?", "you guys tested this on preprod?". Those are requests too, and
+#: the wh-word list alone escalated every one of them.
+YESNO_OPENERS = ("is", "are", "was", "were", "am", "do", "does", "did",
+                 "can", "could", "shall", "should", "will", "would",
+                 "may", "might", "must", "have", "has", "had")
+
+#: how much real content must sit in front of a "?" for it to count on its own
+QUESTION_CONTENT_CHARS = 16
+
 #: a polite ask counts as a request whatever verb follows it — a verb whitelist
 #: alone misses "Please process the refund again".
 REQUEST_PATTERNS = re.compile(
@@ -50,6 +61,35 @@ REQUEST_PATTERNS = re.compile(
 
 MIN_CHARS = 20
 URL_RE = re.compile(r'https?://\S+')
+
+_YESNO_RE = re.compile(
+    r"(?:^|[.!?]\s+|\n)\s*(?:" + "|".join(YESNO_OPENERS) + r")\b", re.I)
+_SUBSTANTIVE_Q_RE = re.compile(
+    r"\w[\w\s,'\"()/-]{" + str(QUESTION_CONTENT_CHARS) + r",}\?")
+
+
+def asks_something(blob: str) -> bool:
+    """Does this text actually ask for something?
+
+    Three ways in, in order of confidence: a wh-word with a question mark; a
+    clause opening with an auxiliary or modal; or a question mark with real
+    content in front of it. The last one is what catches "you guys tested the
+    credit card payment on production clone or preproduction ?", which opens
+    with neither.
+
+    Deliberately narrow on its own: the caller still requires enough content
+    words and rejects text that is mostly filler, so "broken again?" does not
+    get through here.
+    """
+    if "?" not in blob:
+        return False
+    lower = blob.lower()
+    if any(re.search(rf"\b{w}\b", lower) for w in QUESTION_WORDS):
+        return True
+    # an opener alone is not enough — "is it?" is not a request
+    if _YESNO_RE.search(lower) and len(blob.split()) >= 4:
+        return True
+    return bool(_SUBSTANTIVE_Q_RE.search(blob))
 
 
 def _text_of(issue: dict) -> str:
@@ -78,7 +118,7 @@ def restate(issue: dict) -> tuple[str | None, str]:
     lower = blob.lower()
     verbs = [w for w in words if w in REQUEST_VERBS]
     problems = [p for p in PROBLEM_SIGNALS if p in lower]
-    asking = any(re.search(rf"\b{w}\b", lower) for w in QUESTION_WORDS) and "?" in blob
+    asking = asks_something(blob)
     polite = bool(REQUEST_PATTERNS.search(lower))
     if not (verbs or problems or asking or polite):
         return None, ("no request and no reported problem — cannot say what is "

@@ -66,3 +66,56 @@ def setUpModule():
 
 def tearDownModule():
     _BOARDS.__exit__(None, None, None)
+
+
+class YesNoQuestionTests(unittest.TestCase):
+    """Slack asks yes/no questions; the wh-word list alone escalated them all."""
+
+    def ask(self, text):
+        from agents.jira_leader.gates import asks_something
+        return asks_something(text)
+
+    def test_auxiliary_openers_are_questions(self):
+        for text in ("is it possible to have the netsuite location next Monday?",
+                     "are you guys joining the meeting with MY?",
+                     "can we get the export before the review?",
+                     "did the compulsory update go out last night?",
+                     "should I disable the new checkout on ios?",
+                     "has the MY merchant account been switched over?"):
+            self.assertTrue(self.ask(text), text)
+
+    def test_a_declarative_question_still_counts(self):
+        """Opens with neither a wh-word nor an auxiliary."""
+        self.assertTrue(self.ask(
+            "you guys tested the credit card payment on production clone "
+            "or preproduction ?"))
+
+    def test_wh_questions_still_work(self):
+        for text in ("how do I export the daily order report?",
+                     "where do I find the picking list?",
+                     "which shop is affected?"):
+            self.assertTrue(self.ask(text), text)
+
+    def test_short_filler_questions_are_not_requests(self):
+        for text in ("broken again?", "ok?", "really?", "?", "any?"):
+            self.assertFalse(self.ask(text), text)
+
+    def test_a_statement_is_not_a_question(self):
+        for text in ("please add two new locations in NS",
+                     "the storefront still shows the old numbers",
+                     "I have disabled checkout and moved to the old one"):
+            self.assertFalse(self.ask(text), text)
+
+    def test_a_question_mark_alone_is_not_enough_without_content(self):
+        self.assertFalse(self.ask("pls fix?"))
+
+    def test_the_gate_now_restates_a_yes_no_request(self):
+        from agents.jira_leader import gates
+        from tests.helpers import fixture_boards
+        issue = {"fields": {
+            "summary": "is it possible to have the netsuite location for "
+                       "Central Si Racha next Monday?",
+            "description": "", "labels": [], "components": []}}
+        with fixture_boards():
+            requirement, reason = gates.restate(issue)
+        self.assertIsNotNone(requirement, reason)
