@@ -12,13 +12,14 @@ import re
 from dataclasses import dataclass
 
 from agents.historian.retrieval import Historian
+from agents.slack_leader import status as status_mod
 from agents.jira_leader import description as description_mod
 from agents.jira_leader.gates import never_touch, restate
 from core import config, ledger as ledger_mod, log, slack_proposals
 
 LOG = log.get("slack_worker")
 
-MENTION_RE = re.compile(r"<@[A-Z0-9]+>")
+MENTION_RE = re.compile(r"<@[A-Z0-9]+(?:\|[^>]*)?>")  # <@U1> or <@U1|Name>
 LINK_RE = re.compile(r"<(https?://[^|>]+)(\|[^>]*)?>")
 TICKET_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
 #: history worth naming in public — weaker than that and it is a guess
@@ -46,8 +47,11 @@ def clean(text: str) -> str:
 
 def question_of(messages: list[dict], bot_user_id: str | None = None) -> str:
     """The thread's question: the message that mentioned us, plus what led to it."""
+    def addressed(text: str) -> bool:
+        return (f"<@{bot_user_id}>" in text) or (f"<@{bot_user_id}|" in text)
+
     asked = [m for m in messages
-             if not bot_user_id or f"<@{bot_user_id}>" in (m.get("text") or "")]
+             if not bot_user_id or addressed(m.get("text") or "")]
     target = asked[-1] if asked else (messages[-1] if messages else {})
     context = [clean(m.get("text") or "") for m in messages[:6]]
     return " ".join([clean(target.get("text") or ""), *context]).strip()
@@ -64,7 +68,7 @@ def _as_issue(channel_name: str, text: str, asked_by_name: str) -> dict:
 
 def process(mention: dict, *, ledger: ledger_mod.Ledger | None = None,
             historian: Historian | None = None, reader=None,
-            bot_user_id: str | None = None) -> Outcome:
+            jira_reader=None, bot_user_id: str | None = None) -> Outcome:
     """Handle one mention. `mention` carries channel, thread_ts and messages."""
     channel = mention["channel"]
     thread_ts = mention["thread_ts"]
@@ -135,8 +139,22 @@ def process(mention: dict, *, ledger: ledger_mod.Ledger | None = None,
         evidence = [{"ref": e["ref"], "why": e["why"]}
                     for e in research.evidence(limit=4)]
 
-        # 6-7. decide and draft
-        if existing:
+        # 6. a named ticket outranks everything: "where is mine" is the question
+        live = status_mod.lookup(named, ledger=led, reader=jira_reader)
+        status_block = status_mod.paragraph(live)
+
+        # 7. decide and draft
+        if status_block:
+            reply = status_block
+            extra = _answer(procedures, useful_history) if (procedures or
+                                                            useful_history) else ""
+            if extra:
+                reply += "\n\n" + extra
+            else:
+                reply += ("\n\nIf you need anything else on it, say so here.")
+            kind = slack_proposals.POINT_AT_TICKET
+            confidence = 0.8
+        elif existing:
             top = existing[0]
             clones = ", ".join(c["key"] for c in (top.get("open_clones") or []))
             reply = (f"There's already a ticket for this: {top['ref']} — "

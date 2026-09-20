@@ -66,14 +66,30 @@ class SlackMentionSource:
         return out
 
 
-def _run_one(mention: dict, bot_user_id: str | None) -> dict:
+def _jira_reader():
+    """Read-only Jira, or None when it is unavailable.
+
+    A Slack reply is still worth sending without it — the worker degrades to the
+    ledger's half of a ticket's status — so this never raises.
+    """
+    try:
+        from core.jira_client import JiraReadClient
+
+        return JiraReadClient()
+    except Exception as exc:
+        LOG.warn("slack_leader.no_jira", error=str(exc))
+        return None
+
+
+def _run_one(mention: dict, bot_user_id: str | None, jira_reader=None) -> dict:
     with ledger_mod.Ledger() as led, Historian() as hist:
         return worker_mod.process(mention, ledger=led, historian=hist,
+                                  jira_reader=jira_reader,
                                   bot_user_id=bot_user_id).to_dict()
 
 
 def run(source, *, max_workers: int = MAX_WORKERS,
-        bot_user_id: str | None = None) -> dict:
+        bot_user_id: str | None = None, jira_reader=None) -> dict:
     mentions = source.mentions()
     claimed, skipped = [], []
     with ledger_mod.Ledger() as led:
@@ -94,7 +110,9 @@ def run(source, *, max_workers: int = MAX_WORKERS,
     if claimed:
         with ThreadPoolExecutor(max_workers=max_workers,
                                 thread_name_prefix="slack-worker") as pool:
-            futures = {pool.submit(_run_one, m, bot_user_id): m for m in claimed}
+            reader = jira_reader if jira_reader is not None else _jira_reader()
+            futures = {pool.submit(_run_one, m, bot_user_id, reader): m
+                       for m in claimed}
             for future in as_completed(futures):
                 try:
                     outcomes.append(future.result())
@@ -112,6 +130,10 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--file", help="offline mentions json")
     p_run.add_argument("--events", help="json file of Slack app_mention events")
     p_run.add_argument("--workers", type=int, default=MAX_WORKERS)
+    p_run.add_argument("--as-user", dest="as_user",
+                       help="the user id whose mentions are being triaged. With "
+                            "--file this is who <@ID> must match; without it the "
+                            "token's own id is used.")
     sub.add_parser("status")
     args = ap.parse_args(argv)
 
@@ -122,12 +144,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.file:
         source = FileMentionSource(args.file)
-        bot_id = None
+        bot_id = args.as_user
     else:
         from core.slack_client import SlackReadClient
 
         reader = SlackReadClient()
-        bot_id = reader.auth_test().get("user_id")
+        bot_id = args.as_user or reader.auth_test().get("user_id")
         events = json.loads(Path(args.events).read_text()) if args.events else []
         source = SlackMentionSource(events, reader)
     print(json.dumps(run(source, max_workers=args.workers, bot_user_id=bot_id),
