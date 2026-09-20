@@ -299,7 +299,7 @@ class ClaudeAnalyst:
     name = "claude"
 
     def __init__(self, model: str | None = None) -> None:
-        self.model = model or config.env("ANALYST_MODEL", "claude-opus-5")
+        self.model = model or config.env("ANALYST_MODEL", "claude-sonnet-5")
         self.fallback = HeuristicAnalyst()
 
     @staticmethod
