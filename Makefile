@@ -1,4 +1,4 @@
-.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels
+.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels tick tick-install
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -42,6 +42,12 @@ poll-install:  ## install the launchd poller (refuses without an xoxb- token)
 
 panel:  ## review page served from this machine (add HOST=0.0.0.0 for your phone)
 	python3 -m tools.panel --host $(or $(HOST),127.0.0.1)
+
+tick:  ## one board pass: sweep, read labels, mirror status
+	./tools/board_tick.sh
+
+tick-install:  ## run that pass every 5 minutes via launchd
+	./tools/install_tick.sh
 
 labels:  ## read triage-approved / triage-rejected labels off the board
 	python3 -m agents.jira_leader.labels poll $(APPLY)

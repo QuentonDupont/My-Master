@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pomelo.board-tick</string>
+
+  <!-- Absolute paths: launchd runs with a minimal environment and no profile. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/quenton-d/My-Master/tools/board_tick.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/quenton-d/My-Master</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/quenton-d/My-Master</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+
+  <!-- Every 5 minutes. A label you set in Jira is picked up within that. -->
+  <key>StartInterval</key>
+  <integer>300</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- One pass at a time; a slow sweep must not stack up behind itself. -->
+  <key>AbandonProcessGroup</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/quenton-d/My-Master/logs/board_tick.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/quenton-d/My-Master/logs/board_tick.err</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
