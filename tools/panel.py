@@ -171,6 +171,120 @@ MOBILE_HEAD = """
 </style>
 """
 
+#: Swipe to decide. Delegated from the list, because the page re-renders its
+#: cards on every snapshot and per-card listeners would not survive that.
+#:
+#: Right approves. Left does NOT reject — it opens the card and puts the cursor
+#: in the reason box, because a rejection without a reason teaches the system
+#: nothing, and a thumb is exactly how an empty one would get sent.
+SWIPE = """
+<style>
+  article.card { touch-action: pan-y; }
+  article.card.swiping { transition: none; }
+  article.card.settling { transition: transform .18s ease; }
+  .swipe-hint {
+    position: absolute; top: 0; bottom: 0; display: flex; align-items: center;
+    padding: 0 18px; font: 600 13px/1 var(--sans); letter-spacing: .04em;
+    text-transform: uppercase; pointer-events: none; opacity: 0;
+  }
+  .swipe-hint.approve { left: 0;  color: var(--ok); }
+  .swipe-hint.reason  { right: 0; color: var(--warn); }
+  .list { position: relative; }
+  article.card { position: relative; background-clip: padding-box; }
+  @media (prefers-reduced-motion: reduce) {
+    article.card.settling { transition: none; }
+  }
+</style>
+<script>
+(function () {
+  if (!("ontouchstart" in window)) return;   // pointer devices have buttons
+
+  var THRESHOLD = 96;      // px of travel before a swipe counts
+  var SLOP = 12;           // px before we decide horizontal vs vertical
+  var card = null, x0 = 0, y0 = 0, dx = 0, locked = null, hints = null;
+
+  function decided(el) { return el.getAttribute("data-decided") === "true"; }
+
+  function addHints(el) {
+    var wrap = document.createElement("div");
+    wrap.innerHTML =
+      '<div class="swipe-hint approve">Approve</div>' +
+      '<div class="swipe-hint reason">Reason</div>';
+    while (wrap.firstChild) el.appendChild(wrap.firstChild);
+    return el.querySelectorAll(".swipe-hint");
+  }
+
+  document.addEventListener("touchstart", function (e) {
+    var el = e.target.closest && e.target.closest("article.card");
+    if (!el || decided(el)) return;
+    // Let the controls themselves win: a tap on a button is not a swipe.
+    if (e.target.closest("button, textarea, select, a")) return;
+    card = el; x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+    dx = 0; locked = null;
+    hints = addHints(el);
+  }, {passive: true});
+
+  document.addEventListener("touchmove", function (e) {
+    if (!card) return;
+    var t = e.touches[0];
+    var ddx = t.clientX - x0, ddy = t.clientY - y0;
+    if (locked === null) {
+      if (Math.abs(ddx) < SLOP && Math.abs(ddy) < SLOP) return;
+      locked = Math.abs(ddx) > Math.abs(ddy) ? "x" : "y";
+      if (locked === "x") card.classList.add("swiping");
+    }
+    if (locked !== "x") return;
+    e.preventDefault();                       // we own the gesture now
+    dx = ddx;
+    card.style.transform = "translateX(" + dx + "px)";
+    var progress = Math.min(Math.abs(dx) / THRESHOLD, 1);
+    if (hints) {
+      hints[0].style.opacity = dx > 0 ? progress : 0;
+      hints[1].style.opacity = dx < 0 ? progress : 0;
+    }
+  }, {passive: false});
+
+  function reset() {
+    if (!card) return;
+    var el = card;
+    el.classList.remove("swiping");
+    el.classList.add("settling");
+    el.style.transform = "";
+    setTimeout(function () {
+      el.classList.remove("settling");
+      el.querySelectorAll(".swipe-hint").forEach(function (h) { h.remove(); });
+    }, 200);
+    card = null; hints = null; locked = null;
+  }
+
+  document.addEventListener("touchend", function () {
+    if (!card || locked !== "x") { reset(); return; }
+    var el = card, travelled = dx;
+    if (travelled > THRESHOLD) {
+      var approve = el.querySelector('[data-act="approve"]');
+      if (approve) approve.click();
+    } else if (travelled < -THRESHOLD) {
+      // Open the card and ask for the reason rather than rejecting outright.
+      var body = el.querySelector(".body");
+      if (body && body.hidden) {
+        var head = el.querySelector("[data-toggle]");
+        if (head) head.click();
+      }
+      setTimeout(function () {
+        var note = document.querySelector("#" + CSS.escape("note-" +
+          (el.id || "").replace(/^card-/, "")))
+          || el.querySelector("[data-note]");
+        if (note) { note.focus({preventScroll: false}); }
+      }, 60);
+    }
+    reset();
+  }, {passive: true});
+
+  document.addEventListener("touchcancel", reset, {passive: true});
+})();
+</script>
+"""
+
 #: implements the two db calls review_app.html makes, against this server
 SHIM = """
 <script>
@@ -289,7 +403,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path in ("/", "/index.html"):
             html = PAGE.read_text(encoding="utf-8")
-            self._send(200, (MOBILE_HEAD + SHIM + html).encode("utf-8"),
+            self._send(200, (MOBILE_HEAD + SWIPE + SHIM + html).encode("utf-8"),
                        "text/html; charset=utf-8")
             return
         if self.path == "/manifest.webmanifest":
