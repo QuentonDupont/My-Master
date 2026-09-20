@@ -189,6 +189,8 @@ SWIPE = """
   }
   .swipe-hint.approve { left: 0;  color: var(--ok); }
   .swipe-hint.reason  { right: 0; color: var(--warn); }
+  .swipe-hint.armed { font-size: 15px; letter-spacing: .06em; }
+  article.card.armed { box-shadow: inset 0 0 0 2px currentColor; }
   .list { position: relative; }
   article.card { position: relative; background-clip: padding-box; }
   @media (prefers-reduced-motion: reduce) {
@@ -199,7 +201,11 @@ SWIPE = """
 (function () {
   if (!("ontouchstart" in window)) return;   // pointer devices have buttons
 
-  var THRESHOLD = 96;      // px of travel before a swipe counts
+  // Relative to the card, not a fixed number: 96px was a quarter of a wide
+  // card and most of a narrow one, so "far enough" moved with the screen.
+  function threshold(el) {
+    return Math.max(64, Math.min(110, el.offsetWidth * 0.26));
+  }
   var SLOP = 12;           // px before we decide horizontal vs vertical
   var card = null, x0 = 0, y0 = 0, dx = 0, locked = null, hints = null;
   var swallowClick = false;
@@ -240,11 +246,18 @@ SWIPE = """
     e.preventDefault();                       // we own the gesture now
     dx = ddx;
     card.style.transform = "translateX(" + dx + "px)";
-    var progress = Math.min(Math.abs(dx) / THRESHOLD, 1);
+    var limit = threshold(card);
+    var progress = Math.min(Math.abs(dx) / limit, 1);
+    var armed = Math.abs(dx) >= limit;
     if (hints) {
       hints[0].style.opacity = dx > 0 ? progress : 0;
       hints[1].style.opacity = dx < 0 ? progress : 0;
+      // Solid and larger once it will actually fire, so the release is not a
+      // guess — this is the feedback that was missing.
+      hints[0].classList.toggle("armed", armed && dx > 0);
+      hints[1].classList.toggle("armed", armed && dx < 0);
     }
+    card.classList.toggle("armed", armed);
   }, {passive: false});
 
   function reset() {
@@ -262,12 +275,20 @@ SWIPE = """
 
   document.addEventListener("touchend", function () {
     if (!card || locked !== "x") { reset(); return; }
-    var el = card, travelled = dx;
+    var el = card, travelled = dx, limit = threshold(el);
     swallowClick = Math.abs(travelled) > SLOP;
-    if (travelled > THRESHOLD) {
+    if (travelled > limit) {
+      // The buttons live inside .body, which is hidden while the card is
+      // collapsed. Open it first: a click on a button in a hidden container
+      // dispatches, but nothing confirms it to the person who swiped.
+      var body = el.querySelector(".body");
+      if (body && body.hidden) {
+        var toggle = el.querySelector("[data-toggle]");
+        if (toggle) toggle.click();
+      }
       var approve = el.querySelector('[data-act="approve"]');
-      if (approve) approve.click();
-    } else if (travelled < -THRESHOLD) {
+      if (approve) { approve.click(); }
+    } else if (travelled < -limit) {
       // Open the card and ask for the reason rather than rejecting outright.
       var body = el.querySelector(".body");
       if (body && body.hidden) {
