@@ -41,7 +41,16 @@ class Logger:
     def __init__(self, name: str) -> None:
         self.name = name
         self.min_level = _LEVELS.get(os.environ.get("LOG_LEVEL", "INFO").upper(), 20)
-        self.path = config.LOG_DIR / f"{name}.jsonl"
+
+    @property
+    def path(self):
+        """Resolved per write, not at construction.
+
+        Loggers are module-level, so the path used to be fixed at import. _emit
+        then created the current LOG_DIR and wrote to the captured one, which
+        are only the same directory by luck.
+        """
+        return config.LOG_DIR / f"{self.name}.jsonl"
 
     def _emit(self, level: str, event: str, **fields: Any) -> None:
         if _LEVELS[level] < self.min_level:
@@ -49,14 +58,23 @@ class Logger:
         record = {"ts": _now(), "level": level, "logger": self.name, "event": event}
         record.update(redact(fields))
         line = json.dumps(record, default=str, ensure_ascii=False)
-        with _lock:
-            config.LOG_DIR.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a", encoding="utf-8") as fh:
-                fh.write(line + "\n")
-            if os.environ.get("LOG_STDERR", "1") == "1":
-                import sys
+        # Logging must never break the thing it is describing. A rejection that
+        # records its correction and then fails to transition the ledger because
+        # the log file could not be opened is worse than a missing log line.
+        try:
+            with _lock:
+                config.LOG_DIR.mkdir(parents=True, exist_ok=True)
+                with self.path.open("a", encoding="utf-8") as fh:
+                    fh.write(line + "\n")
+        except OSError:
+            pass
+        if os.environ.get("LOG_STDERR", "1") == "1":
+            import sys
 
+            try:
                 print(line, file=sys.stderr)
+            except OSError:
+                pass
 
     def debug(self, event: str, **f: Any) -> None:
         self._emit("DEBUG", event, **f)

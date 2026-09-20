@@ -1,3 +1,5 @@
+import pathlib
+import shutil
 import unittest
 
 from core import config, miniyaml
@@ -70,3 +72,41 @@ f: true
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LoggerRobustnessTests(unittest.TestCase):
+    """Logging must never break the operation it is describing."""
+
+    def test_the_path_follows_a_changed_log_dir(self):
+        import tempfile
+        from core import config, log
+        saved = config.LOG_DIR
+        try:
+            with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+                logger = log.get("probe")
+                config.LOG_DIR = pathlib.Path(a)
+                first = logger.path
+                config.LOG_DIR = pathlib.Path(b)
+                self.assertNotEqual(first, logger.path)
+                self.assertTrue(str(logger.path).startswith(b))
+        finally:
+            config.LOG_DIR = saved
+
+    def test_a_write_failure_does_not_reach_the_caller(self):
+        """A rejection that logs and then cannot transition is worse than a
+        missing log line. This is what broke mobile.apply mid-rejection."""
+        import tempfile
+        from core import config, log
+        saved = config.LOG_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                gone = pathlib.Path(d) / "removed"
+                gone.mkdir()
+                config.LOG_DIR = gone / "deeper"
+                config.LOG_DIR.mkdir()
+                logger = log.get("probe")
+                logger.info("before", ok=True)
+                shutil.rmtree(gone)
+                logger.info("after", ok=True)     # must not raise
+        finally:
+            config.LOG_DIR = saved
