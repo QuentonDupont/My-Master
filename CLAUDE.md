@@ -45,7 +45,27 @@ Do not query, write to, or reason about any other Jira project.
    - a transition the workflow does not offer is reported, never forced
    Everything else still goes through `execute_proposal`.
 2. **No writes to Apollo or Henry. Ever.** Read-only integrations only, and only
-   after they are explicitly added in a later phase. Right now: no integration at all.
+   after they are explicitly added in a later phase.
+
+   **One exception, added 21 Sep 2026 by the board owner: the Marketing &
+   Onsite team** (`agents/marketing_onsite/`) sets up content in Apollo for web
+   and app. Henry remains untouched, permanently and with no exception. The
+   Apollo exception is exactly this wide and no wider:
+   - content surfaces only — the ones declared in
+     `agents/marketing_onsite/surfaces.py`. A surface not in that table is not
+     touched, and the code raises rather than guessing.
+   - never orders, customers, refunds, credit, pricing or stock. Those stay
+     never-touch under invariant 3 whoever is asking.
+   - **every change is staged inactive.** The board owner's words, 21 Sep 2026:
+     *"all changes need to inactive, if not possible then please continue with
+     the change."* So each surface declares how a change is parked — a
+     visibility flag, a future-dated window, or every market unticked. Where a
+     surface can do none of those, the change still proceeds, and the plan is
+     marked `stages_live` and reported to him first, before anything else.
+   - a worker drafts; it does not apply. Applying a plan to production is a
+     separate human-gated step.
+   - the team reports to the board owner directly, not through the Jira Leader
+     or the Chief of Staff.
 3. **Never-touch categories** are escalated to the human with no comment and no
    clone, regardless of confidence: refunds, payments, pricing, customer PII,
    stock adjustments, account access/permissions.
