@@ -21,10 +21,23 @@ _None approved yet._
 
 <!-- e.g. "Never promise a delivery date in a PESD1 comment." -->
 
-_None approved yet._
+- Default to ANSWERABLE, not NEEDS_CODE or ESCALATE, unless a developer change
+  is actually required — the human has reclassified worker output this way
+  10 times (6 NEEDS_CODE→ANSWERABLE, 4 ESCALATE→ANSWERABLE). Approved 2026-09-21.
 
 ## Phrasing
 
 <!-- e.g. "Do not open a comment with an apology." -->
 
-_None approved yet._
+- For a NetSuite COGS-not-posted report caused by zero on-hand stock at
+  fulfilment, do not write "reviewed the report and it needs a change on our
+  side." Write instead: "Closing the loop on this one with the investigation
+  result from the NetSuite developer. The COGS GL was not recorded for these
+  orders because the SKUs had zero inventory on hand at the time of
+  fulfilment, specifically at TH Bangna Warehouse. With no on-hand quantity
+  NetSuite cannot determine the item cost, so it does not post a COGS GL
+  impact. Once stock is available again at that location the COGS GL will
+  post correctly. This is working as designed rather than a defect, so no
+  code change is planned. If you see this on an order where the SKU did have
+  stock at Bangna at the time of fulfilment, reply here with the order number
+  and we will look at that case specifically." Approved 2026-09-21.
