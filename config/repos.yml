@@ -3,10 +3,27 @@
 #   python -m agents.chief_of_staff.rules  (proposals)  or re-mine the corpus.
 org: pomelofashion
 
-# GitHub repos are UNVERIFIED placeholders — only used by `corpus.export github`,
-# which is skipped unless GITHUB_TOKEN is set. Replace with the real names before
-# turning that on.
-repos: []
+# Real repos, read from the org on 20 Sep 2026 and matched to the components
+# below. Used by `corpus.export github`, which searches for commits and PRs
+# mentioning a ticket key — it links a ticket to the change that fixed it. It
+# does not index source, so it tells you WHICH change, not how the code works.
+#
+# Infrastructure and terraform-* repos are left out: they carry no ticket keys
+# that triage would ever need to find.
+repos:
+  - name: apollo          # storefront, price labels, merchandising
+  - name: api             # the endpoint layer most PESD1 tickets touch
+  - name: api-next
+  - name: www             # web
+  - name: henry           # warehouse, factory, purchase orders
+  - name: netsuite        # invoices, GL, unit cost
+  - name: netsuite-next
+  - name: pims            # product information
+  - name: mobile-ios
+  - name: mobile-android
+  - name: neon            # marketplaces
+  - name: neon-v2
+  - name: multivac
 
 # Ticket text -> component. Drives clone labels and developer routing.
 # The tags on the left match how PRDT summaries are already prefixed.
