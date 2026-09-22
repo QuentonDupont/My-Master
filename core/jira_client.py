@@ -339,6 +339,15 @@ class JiraWriteClient(_Base):
     def restore_description(self, key: str, previous: str) -> dict:  # undo
         return self.set_description(key, previous)
 
+    def set_summary(self, key: str, summary: str) -> dict:
+        assert_key_allowed(key)
+        return self._do("set_summary", {"key": key, "summary": summary[:120]},
+                        lambda: self._request("PUT", f"/rest/api/2/issue/{key}",
+                                              body={"fields": {"summary": summary}}))
+
+    def restore_summary(self, key: str, previous: str) -> dict:  # undo
+        return self.set_summary(key, previous)
+
     def set_priority(self, key: str, priority: str) -> dict:
         assert_key_allowed(key)
         return self._do("set_priority", {"key": key, "priority": priority},
