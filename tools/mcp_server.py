@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import secrets
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from core import config, log
@@ -275,6 +276,9 @@ class Handler(BaseHTTPRequestHandler):
     def _send(self, code: int, body: bytes, ctype="application/json") -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
+        session = self.headers.get("Mcp-Session-Id")
+        if session:
+            self.send_header("Mcp-Session-Id", session)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -288,7 +292,37 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/health":
             self._send(200, b'{"ok":true}')
             return
-        self._send(404, b'{"error":"not found"}')
+        # Streamable HTTP: a client opens the stream with GET before it posts
+        # anything. Answering 404 here meant the handshake never started, so no
+        # tool call ever arrived — the server looked fine to curl and dead to a
+        # real client.
+        if not self._authorised():
+            LOG.warn("mcp.unauthorised", path=self.path, method="GET")
+            self._send(401, b'{"error":"unauthorised"}')
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        try:
+            while True:
+                # A comment frame is a valid SSE keepalive and carries no data,
+                # so nothing is sent that a client has to understand.
+                self.wfile.write(b": keepalive\n\n")
+                self.wfile.flush()
+                time.sleep(15)
+        except (BrokenPipeError, ConnectionResetError):
+            LOG.info("mcp.stream_closed")
+
+    def do_DELETE(self) -> None:
+        """Clients end a session with DELETE; there is no per-session state."""
+        self._send(200, b'{"ok":true}')
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(204)
+        self.send_header("Allow", "GET, POST, DELETE, OPTIONS")
+        self.end_headers()
 
     def do_POST(self) -> None:
         if not self._authorised():
