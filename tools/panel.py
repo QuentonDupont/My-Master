@@ -363,6 +363,18 @@ window.claude.use = async function (name) {
   };
   setInterval(() => push(false), 4000);
   setTimeout(() => push(true), 0);
+
+  // Phones suspend timers the moment the tab isn't the one on screen — locked,
+  // backgrounded, or (worse, on iOS home-screen PWAs) frozen outright. The 4s
+  // poll above just stops firing, so whatever was current when it went away is
+  // what you see when you come back, until the next tick happens to land.
+  // Force an immediate catch-up on every signal that the page is back in
+  // front of someone, rather than waiting on the interval to notice.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") push(true);
+  });
+  window.addEventListener("pageshow", () => push(true));   // bfcache restores
+  window.addEventListener("focus", () => push(true));       // desktop/other
   return {
     collection: (coll) => ({
       onSnapshot: (next, _err) => { subs.push([coll, next]); push(); return () => {}; },
