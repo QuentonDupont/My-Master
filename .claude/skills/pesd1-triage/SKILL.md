@@ -59,6 +59,17 @@ once (68 corrections, zero approved rules). Run it periodically as part of a
 board sweep, surface the output, and be explicit that nothing in it is live
 until approved — don't let it silently pile up again.
 
+## Before drafting a comment: read the whole thread
+
+- **Check whether the work is already done.** PESD1-11281 had both deletions
+  confirmed in comments by Vishal and Wallop, and a later comment still asked
+  the requester for identifiers that were in the description. Read every
+  comment and the description fields (Steps to reproduce, Expected Outcome)
+  before asking a requester for anything.
+- **Writes made through the Atlassian connector skip the ledger.** Until the
+  connector is wired into `execute_proposal`, record each approved connector
+  write (comment ids, clone keys) in HANDOFF.md so there is a record to undo.
+
 ## Adding to this file
 
 When a mistake or a correction in a session is the kind that would recur in a
