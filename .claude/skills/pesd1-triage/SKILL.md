@@ -46,10 +46,12 @@ drafting anything. Run this after the gates below pass.
    - **PESD1 comment (requester-facing):** what will be done, by whom, and
      what they will see when it is done. Plain language. Do not say it is
      done until someone has confirmed it.
-   - **Fix brief (for whoever does the work):** on the PRDT clone
-     description, or, when there is no clone, an internal note on the PESD1
-     ticket (`jsmCommentType: internalNote`, so the requester does not see
-     it). Include:
+   - **Fix brief (for whoever does the work):** a comment on the PRDT
+     clone. With no clone, a comment on the PESD1 ticket, **which the
+     requester can see**: this site has no JSM internal notes
+     (`jsmCommentType: internalNote` falls back to a public comment,
+     learned 23 Sep 2026). Write it so a requester reading it is fine, and
+     say it is requester-visible when asking for approval. Include:
      **Fix** (numbered steps, with record paths/links) · **Who** ·
      **Verify** (the exact check that proves it) · **Root cause** (evidence
      vs inference, labelled) · **Precedents** (keys with who fixed them and

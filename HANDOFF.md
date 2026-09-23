@@ -36,6 +36,15 @@ record). Verified by reading back.
 
 Both clones are under epic PRDT-11563, linked with Cloners.
 
+Fix briefs (researched from precedent, PRDT dev comments, Confluence and Slack,
+now in `.claude/skills/pesd1-triage/playbooks.md`) were posted as comments:
+PESD1-11283 (283803), PESD1-11284 (283804), PRDT-11596 (283805),
+PRDT-11597 (283806). The two PESD1 ones were meant as internal notes, but JSM
+comment types are not enabled here, so they are **requester-visible**.
+
+Security: the Superset MCP bearer token has been pasted in plain text in
+several Slack DMs. It should be rotated and kept in Vault only.
+
 Left for the human (never-touch, no comment): **11276** (pricing), **11289**
 (perks credit + customer email — "perks credit" added to never_touch.yml),
 **11279** (set 17 RMAs to Return Received — treated as refund-adjacent; owner
