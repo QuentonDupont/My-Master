@@ -122,6 +122,53 @@ https://pomelofashion.atlassian.net/wiki/spaces/henry/pages/2379939842
 
 ---
 
+## Apollo ↔ NetSuite: return (RMA) not syncing / wrong status
+
+*Looks like:* "The return order is not syncing", "RMAxxxx still incorrect
+status", "not updated in Superset". From TH Ops.
+
+**Fix**
+1. Apollo admin, open the return:
+   `apollo.pomelofashion.com/sp/index.php?controller=AdminReturn&updateorder_return&id_order_return=<id>`
+   and press **Sync RMA** (Ops tech linked this page on PESD1-11092; the
+   warehouse used the button in #logistic_x_wh, 22 Sep 2026). This is a
+   human with Apollo admin, never the system: invariant 2.
+2. If it fails, read the error in NetSuite's **Integration log**
+   ("NetSuite handbook", NIM space, /wiki/spaces/NIM/pages/2395930626).
+3. `[INCORRECT_STATUS]` or no invoice → the original sales order is not
+   Billed/Closed:
+   - Fulfilment stuck at *Packed*: call
+     `https://nimbus.pomelofashion.com/fulfillment/{orderid}/sync`, then
+     retry step 1 ("How-to: RMA won't sync to from Apollo to NS", PM,
+     /wiki/spaces/PM/pages/1303117969).
+   - Or bill the sales order in NetSuite (Ajju Gupta, PRDT-10762, 27 Jan 2026).
+4. A long customer memo also breaks the sync. Shorten it and re-trigger
+   (PRDT-11453; a character limit is now Live).
+5. Status going back to Apollo comes from the NetSuite scheduled script *INT
+   API Return Order Status Update* (`customscript_int_api_sd_ro_status_update`).
+
+**Who:** Wallop (Apollo, PESD1-11168), Vishal (NetSuite, PRDT-11030),
+Ajju Gupta (billing, PRDT-10762). Steps 2–3 need NetSuite admin, so a developer.
+
+**Verify:** Apollo and NetSuite show the same return status. The RMA
+appears in Superset with that status (chart slice_id=1988, as on
+PESD1-11139). Superset lag is a separate recurring symptom
+(PESD1-11137, 11139, 11141).
+
+**Recurs:** yes. PRDT-11570 (To Do, Vishal) lists 7 manual resyncs since 31
+Jul with no root cause. PRDT-10802 (auto-create missing invoice) is Live
+but hasn't stopped it. Link new cases to PRDT-11570.
+
+**Refund risk, unresolved:** "Apollo Return Process" (PM,
+/wiki/spaces/PM/pages/2865364993) says Return Received is set from
+NetSuite, then a refund is "submitted" and a credit slip generated. The
+2022 ENG design made this automatic. PRDT-10994: for MY, syncing
+"automatically triggers receipt". Until a developer confirms, treat **setting
+a return to Received by hand** (e.g. PESD1-11279) as never-touch (refunds).
+A plain re-sync of a return that is already Received in NetSuite is fine.
+
+---
+
 ## Platform connections
 
 What we can check a ticket against, and from where. Read-only, always.
@@ -132,4 +179,18 @@ What we can check a ticket against, and from where. Read-only, always.
 | Confluence (OP, PSD, PM, NEON, MUL, TSD, NIM) | SOPs | yes: Atlassian connector |
 | Slack | fixes agreed in threads | yes: Slack connector (read; drafts only after approval) |
 | Google Drive | ticket attachments, intake sheet | yes: Drive connector |
-| NetSuite / Apollo / Henry / Superset | live record state | to be filled in: see below |
+| **Superset MCP** `superset-mcp-th.pmlo.co/mcp` (Redshift: returns, inventory, TOs, NS-vs-ERPLY) | live record state: the best check-up source | **no.** The host is not in the network allowlist and there's no token in the env secrets. Works in Claude Desktop (Raj, Aug 2026). The key is in Vault `pmlo/services/superset` |
+| Superset UI `superset.pomelofashion.com` | same data, as dashboards (e.g. slice 1988 for returns) | no: SSO login plus proxy |
+| NetSuite SuiteAnalytics Connect (ENG 2907668483, draft) | SuiteQL | no: personal login only, no service account |
+| Apollo / Henry admin, production DBs | record state | no, and **by design** (invariant 2; SSH per engineer) |
+| GitHub `pomelofashion/*` (repos.yml) | which commit/PR fixed a ticket | partly: needs `add_repo` for the org |
+
+**To turn on live check-ups:** the owner adds `superset-mcp-th.pmlo.co` to
+the environment's network allowlist, and `SUPERSET_MCP_TOKEN` to its secrets
+(or adds the server as a claude.ai custom connector). That is a new
+read-only integration, so it needs his approval (CLAUDE.md invariant 2).
+Until then, write "not verified against Superset" in a fix brief rather
+than implying a check was made.
+
+**Never copy the Superset token from Slack.** It has been pasted in plain text
+in several DMs. It belongs in Vault and env secrets only (invariant 7).
