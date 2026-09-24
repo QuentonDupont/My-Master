@@ -1,0 +1,57 @@
+# Digital Twin — sources it may read, and the live-alert pilot.
+#
+# Everything here is READ ONLY. The twin drafts; a human sends. Turning a
+# source on here is not the same as it working: a source is "working" only
+# once `python -m agents.digital_twin.lead test <source>` has passed, and the
+# result of that test is recorded in the Work Profile's source list.
+
+# Used for cursors, deadlines and meeting times. Ask, never assume.
+time_zone: Asia/Bangkok
+
+sources:
+  # Snapshots the person pastes or uploads when an app cannot connect
+  # (starter file, section C). One JSON file per snapshot, dropped in the
+  # folder below. A snapshot is a copy from that moment, not a live feed.
+  - name: pasted
+    kind: file
+    enabled: true
+    path: twin/inbox
+
+  # The triage system's own state — what is waiting for the board owner.
+  - name: triage
+    kind: triage
+    enabled: true
+
+  # Slack, read as the person via SLACK_USER_TOKEN (their channels and DMs)
+  # or as the bot via SLACK_BOT_TOKEN (only channels it was invited to).
+  # `channels` is the allowed set. Empty means NOTHING is read — start small.
+  - name: slack
+    kind: slack
+    enabled: false
+    channels: []
+
+  # Gmail, Calendar and Drive need GOOGLE_* in .env (see .env.example).
+  # Read-only scopes only; the client has no method that writes.
+  - name: gmail
+    kind: gmail
+    enabled: false
+    query: "newer_than:1d -category:promotions -category:social"
+  - name: calendar
+    kind: calendar
+    enabled: false
+    calendar_id: primary
+  - name: drive
+    kind: drive
+    enabled: false
+    # Files or folder ids to watch. Empty means nothing is read.
+    files: []
+
+# Live-alert pilot (starter file, sections F–G). Poll-based: `alerts once`
+# reads the sources named here and raises an alert only for the signals
+# listed. Paused by default; nothing is watched until the person turns it on.
+alerts:
+  paused: true
+  sources: []
+  notify_on: [decision, promise, deadline, blocker, completed]
+  # Alerts per day. Past this the twin records "budget spent" and stops.
+  budget_per_day: 20

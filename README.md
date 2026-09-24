@@ -23,6 +23,7 @@ Build order is Historian → Jira Leader → Chief of Staff → Slack Leader.
 | Jira Leader (`agents/jira_leader`) | built — queue, 5 concurrent workers, batch assembly, execution hand-off |
 | Chief of Staff (`agents/chief_of_staff`) | built — morning brief, rule proposals, cost, error review |
 | Slack Leader (`agents/slack_leader`) | built — mentions: 3 concurrent thread workers, reply proposals, single write path with undo. Needs `SLACK_BOT_TOKEN` to run live |
+| Digital Twin (`agents/digital_twin`) | built — personal Chief of Staff: Work Profile, Task List, morning/EOD updates from allowed sources, drafts in the owner's voice, live-alert pilot. Read and draft only; never sends |
 
 Apollo and Henry have no integration at all, by design.
 
@@ -123,6 +124,35 @@ Never-touch subjects get total silence — no reply, no acknowledgement.
 Needs the bot token (`xoxb-`), not the app-level token (`xapp-`): Slack answers
 `not_allowed_token_type` to the latter for every read and every post.
 
+## The Digital Twin
+
+A personal Chief of Staff for the board owner, separate from the triage
+brief. Built from the staff starter file in `agents/digital_twin/spec/`.
+
+```bash
+make twin-setup        # Work Profile, one question at a time — skip any
+python3 -m agents.digital_twin.lead test pasted    # prove a source, record it
+make twin-morning      # what changed, what needs me, what is next
+make twin-eod
+make twin-export       # "save my work profile and task list" -> twin/exports/
+```
+
+Sources live in `config/twin.yml` and are off until you enable them; enabled
+is not the same as working — only a passed test marks a source "working" on
+the profile's source list. When an app cannot connect, drop a JSON snapshot in
+`twin/inbox/` (see `tests/fixtures/twin_snapshot.json` for the shape) and the
+update reads that instead, saying it is a snapshot.
+
+What it will not do: send. Drafts (`agents.digital_twin.drafts`) are yours to
+send from the app; then `drafts sent <id> --proof <link>` records it and closes
+the linked task. The Google client is read-only by construction and the test
+suite asserts the package imports no write client.
+
+Live alerts (`agents.digital_twin.alerts`) are a poll-based pilot, paused by
+default, budgeted per day, quiet on routine items. A push bridge (Slack Socket
+Mode, Gmail Pub/Sub, Drive watch) is not built; `bridge.py` is the durable
+queue one would feed, and `alerts test-event` proves that path end to end.
+
 ## Reviewing from your phone
 
 `tools/review_app.html` is published as a private page on claude.ai. It shows the
@@ -193,7 +223,8 @@ config/     boards.yml, never_touch.yml, repos.yml, .env.example
 core/       ledger.py proposals.py execute.py jira_client.py
             config.py log.py requester.py corrections.py miniyaml.py
 corpus/     export.py index.py (+ corpus.db, ledger.db — gitignored)
-agents/     historian/ jira_leader/ chief_of_staff/
+agents/     historian/ jira_leader/ chief_of_staff/ slack_leader/ marketing_onsite/ digital_twin/
+twin/       the Digital Twin's records — profile, tasks, drafts, cursors (gitignored)
 knowledge/  rules.md, corrections.jsonl, sops/
 review/     generated batches, briefs, rule proposals (gitignored)
 tests/      75 tests, stdlib unittest, no network

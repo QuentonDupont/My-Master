@@ -39,6 +39,7 @@ def sandbox():
             "LEDGER_DB": config.LEDGER_DB, "CORPUS_DB": config.CORPUS_DB,
             "REVIEW_DIR": config.REVIEW_DIR, "LOG_DIR": config.LOG_DIR,
             "CORRECTIONS": config.CORRECTIONS, "KNOWLEDGE_DIR": config.KNOWLEDGE_DIR,
+            "TWIN_DIR": config.TWIN_DIR,
             "STORE": proposals.STORE,
         }
         config.LEDGER_DB = root / "ledger.db"
@@ -46,10 +47,11 @@ def sandbox():
         config.REVIEW_DIR = root / "review"
         config.LOG_DIR = root / "logs"
         config.KNOWLEDGE_DIR = root / "knowledge"
+        config.TWIN_DIR = root / "twin"
         config.CORRECTIONS = root / "knowledge" / "corrections.jsonl"
         proposals.STORE = root / "review" / "proposals"
         for d in (config.REVIEW_DIR, config.LOG_DIR, config.KNOWLEDGE_DIR,
-                  proposals.STORE):
+                  config.TWIN_DIR, proposals.STORE):
             d.mkdir(parents=True, exist_ok=True)
         try:
             with fixture_boards():

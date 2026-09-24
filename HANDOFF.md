@@ -87,6 +87,34 @@ The claude.ai Slack connector is authenticated; its tools load on a fresh start.
 - **Requester updates** are the agreed next feature, after mentions. Undecided:
   whether an update goes to the requester in a DM or back to the channel.
 
+## Digital Twin — 24 Sep
+
+The board owner uploaded the staff "digital twin" starter (v3) and asked what
+we had. The triage Chief of Staff covers only the ticket side, so
+`agents/digital_twin/` was built as a separate, read-and-draft-only team that
+reports to him directly (same footing as `marketing_onsite`). Spec copied to
+`agents/digital_twin/spec/`.
+
+Built and tested offline: Work Profile + Task List (`twin/`, gitignored),
+source adapters (pasted snapshots, triage ledger, Slack, Gmail, Calendar,
+Drive — the last four off until enabled and tested), per-source cursors,
+morning/EOD updates, meeting prep, drafts with sent-proof, live-alert pilot
+with the bridge intake queue. `core/google_client.py` is read-only.
+
+Waiting on the owner:
+1. Run `make twin-setup` and answer the profile questions (or skip them).
+2. Decide which Slack channels and Drive files go in `config/twin.yml` —
+   empty lists read nothing, on purpose.
+3. Google: an OAuth client with the three read-only scopes, values in `.env`
+   (`GOOGLE_*`, see `.env.example`). Until then Gmail/Calendar/Drive stay
+   "not enabled" and the pasted-snapshot route works.
+4. Whether alerts should run at all (`alerts resume`), and on which sources.
+
+Not built: the push bridge itself (Socket Mode / Pub/Sub / Drive watch) — the
+queue it would feed exists (`bridge.py`). A model-backed drafter and signal
+classifier would slot into `drafts.compose` and `items.signals`; both are
+keyword heuristics today.
+
 ## Standing instructions from the board owner
 
 - Keep developer-facing text direct and precise. They should not have to read

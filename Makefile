@@ -1,4 +1,4 @@
-.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels tick tick-install mcp connector-install connector-url
+.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels tick tick-install mcp connector-install connector-url twin twin-setup twin-morning twin-eod twin-export twin-alerts
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -72,6 +72,24 @@ brief:  ## morning brief
 
 rules:  ## propose rules from knowledge/corrections.jsonl
 	python3 -m agents.chief_of_staff.rules --write
+
+twin:  ## digital twin: sources, records, drafts, alerts at a glance
+	python3 -m agents.digital_twin.lead status
+
+twin-setup:  ## work profile, one question at a time
+	python3 -m agents.digital_twin.lead setup
+
+twin-morning:  ## morning update from the sources you have allowed
+	python3 -m agents.digital_twin.lead morning
+
+twin-eod:  ## end-of-day update
+	python3 -m agents.digital_twin.lead eod
+
+twin-export:  ## "save my work profile and task list" -> one dated file
+	python3 -m agents.digital_twin.lead export
+
+twin-alerts:  ## one pass of the live-alert pilot (paused unless resumed)
+	python3 -m agents.digital_twin.alerts once
 
 clean: demo-reset  ## demo-reset plus the corpus index
 	rm -f corpus/corpus.db corpus/corpus.db-wal corpus/corpus.db-shm
