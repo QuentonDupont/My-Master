@@ -30,13 +30,14 @@ wifi; it has no authentication, so only do that on a network you trust.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import shutil
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from core import config, log
+from core import config, ledger as ledger_mod, log
 
 LOG = log.get("panel")
 
@@ -434,6 +435,192 @@ def _documents() -> dict:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+#: past this, "approved but not executed" is worth a flag rather than assumed
+#: to be mid-review. Execution stays a deliberate manual command by design —
+#: this is a reminder, not evidence of a bug.
+STUCK_APPROVAL_HOURS = 6
+
+
+def _age_minutes(iso_ts: str) -> float | None:
+    try:
+        then = dt.datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=dt.timezone.utc)
+        return (dt.datetime.now(dt.timezone.utc) - then).total_seconds() / 60
+    except (ValueError, AttributeError):
+        return None
+
+
+def _heartbeat_age(name: str) -> float | None:
+    path = config.LOG_DIR / f".heartbeat_{name}"
+    if not path.exists():
+        return None
+    return _age_minutes(path.read_text(encoding="utf-8").strip())
+
+
+def _health() -> dict:
+    """Everything 'is the flow actually working' that used to need a CLI.
+
+    Every value here is defensive — a health check that can itself fail is
+    worse than no health check, so each section is wrapped and degrades to
+    null/empty rather than 500ing the whole page.
+    """
+    out: dict = {"generated": dt.datetime.now(dt.timezone.utc).isoformat(
+        timespec="seconds")}
+
+    try:
+        out["board_tick_minutes_ago"] = _heartbeat_age("board_tick")
+    except Exception:
+        out["board_tick_minutes_ago"] = None
+    try:
+        out["corpus_refresh_minutes_ago"] = _heartbeat_age("corpus_refresh")
+    except Exception:
+        out["corpus_refresh_minutes_ago"] = None
+
+    try:
+        markers = sorted(p.name for p in
+                         (config.LOG_DIR / ".markers").glob("*")) \
+            if (config.LOG_DIR / ".markers").is_dir() else []
+        out["active_alerts"] = markers
+    except Exception:
+        out["active_alerts"] = []
+
+    try:
+        with ledger_mod.Ledger() as led:
+            approved = led.by_state(ledger_mod.APPROVED, ledger_mod.CORRECTED)
+        stuck = []
+        for row in approved:
+            age = _age_minutes(row["last_processed"])
+            if age is not None and age > STUCK_APPROVAL_HOURS * 60:
+                stuck.append({"ticket": row["ticket_key"],
+                             "hours_waiting": round(age / 60, 1)})
+        out["approved_not_executed"] = len(approved)
+        out["approved_and_aging"] = stuck
+    except Exception:
+        out["approved_not_executed"] = None
+        out["approved_and_aging"] = []
+
+    try:
+        from core import corrections as corrections_mod
+
+        review_files = sorted(config.REVIEW_DIR.glob("rule_proposals_*.md"))
+        last_review = (review_files[-1].stat().st_mtime if review_files else 0)
+        since = dt.datetime.fromtimestamp(last_review, dt.timezone.utc)
+        unreviewed = [c for c in corrections_mod.load()
+                     if dt.datetime.fromisoformat(c["ts"]) > since]
+        out["corrections_since_last_rule_review"] = len(unreviewed)
+        out["last_rule_review"] = (review_files[-1].name if review_files
+                                   else None)
+    except Exception:
+        out["corrections_since_last_rule_review"] = None
+        out["last_rule_review"] = None
+
+    try:
+        from agents.chief_of_staff import brief as brief_mod
+
+        errs = brief_mod.errors(days=1)
+        out["errors_24h"] = errs.get("total_errors")
+        out["warn_by_logger_24h"] = errs.get("warn_by_logger")
+    except Exception:
+        out["errors_24h"] = None
+        out["warn_by_logger_24h"] = {}
+
+    # Approved rules that the currently-active analyst cannot actually apply —
+    # found live: 2 rules approved into rules.md while ANTHROPIC_API_KEY was
+    # unset, so every worker ran on HeuristicAnalyst, which ignores rules_text
+    # entirely. Not silently fixed (see analysis.HeuristicAnalyst's docstring);
+    # surfaced here instead.
+    try:
+        from agents.jira_leader import analysis as analysis_mod
+
+        approved = analysis_mod.count_approved_rules()
+        out["approved_rules"] = approved
+        out["rules_active_but_unused"] = (
+            approved > 0 and not analysis_mod.ClaudeAnalyst.available())
+    except Exception:
+        out["approved_rules"] = None
+        out["rules_active_but_unused"] = False
+
+    return out
+
+
+def _health_html(data: dict) -> str:
+    """A small, standalone page — deliberately NOT part of review_app.html,
+    which is kept byte-identical to the Artifact-hosted version so it never
+    forks (see the module docstring). This is panel-only."""
+    def row(label: str, value) -> str:
+        return f'<div class="r"><span class="k">{label}</span><span class="v">{value}</span></div>'
+
+    def fmt_age(minutes: float | None) -> str:
+        if minutes is None:
+            return "never recorded"
+        if minutes < 60:
+            return f"{minutes:.0f}m ago"
+        return f"{minutes / 60:.1f}h ago"
+
+    ok = (not data.get("active_alerts")
+          and (data.get("board_tick_minutes_ago") or 9999) < 15
+          and not data.get("approved_and_aging")
+          and not data.get("rules_active_but_unused"))
+    banner = ("all green" if ok else "needs a look")
+    banner_class = "ok" if ok else "warn"
+
+    alerts_html = "".join(
+        f'<div class="r"><span class="k">⚠ {a}</span></div>'
+        for a in data.get("active_alerts", []))
+    aging_html = "".join(
+        f'<div class="r"><span class="k">{a["ticket"]}</span>'
+        f'<span class="v">{a["hours_waiting"]}h waiting</span></div>'
+        for a in data.get("approved_and_aging", []))
+    warn_html = "".join(
+        f'<div class="r"><span class="k">{name}</span><span class="v">{count}</span></div>'
+        for name, count in list((data.get("warn_by_logger_24h") or {}).items())[:5])
+
+    return f"""<!doctype html>
+<title>Flow health</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body {{ background:#131217; color:#f1eff4; font:15px -apple-system,sans-serif;
+         margin:0; padding:20px 16px 40px; }}
+  h1 {{ font-size:17px; margin:0 0 4px; }}
+  .sub {{ color:#928d9b; font-size:12px; margin-bottom:16px; }}
+  .banner {{ padding:10px 14px; border-radius:8px; font-weight:600; margin-bottom:16px; }}
+  .banner.ok {{ background:#14291f; color:#6cc79b; }}
+  .banner.warn {{ background:#2f1817; color:#f08a83; }}
+  .card {{ background:#1b1a20; border:1px solid #2c2a33; border-radius:10px;
+          padding:12px 14px; margin-bottom:10px; }}
+  .card h2 {{ font-size:12px; text-transform:uppercase; letter-spacing:.04em;
+             color:#928d9b; margin:0 0 8px; }}
+  .r {{ display:flex; justify-content:space-between; padding:3px 0; font-size:13.5px; }}
+  .k {{ color:#a39eae; }}
+  .v {{ font-variant-numeric:tabular-nums; }}
+  a {{ color:#ff7096; }}
+</style>
+<h1>Flow health</h1>
+<div class="sub">generated {data['generated']} · <a href="/">back to the queue</a></div>
+<div class="banner {banner_class}">{banner}</div>
+<div class="card"><h2>Scheduled jobs</h2>
+  {row("board tick", fmt_age(data.get('board_tick_minutes_ago')))}
+  {row("corpus refresh", fmt_age(data.get('corpus_refresh_minutes_ago')))}
+</div>
+{f'<div class="card"><h2>Active alerts</h2>{alerts_html}</div>' if data.get("active_alerts") else ""}
+<div class="card"><h2>Approved, not yet executed</h2>
+  {row("total", data.get('approved_not_executed'))}
+  {aging_html or '<div class="r"><span class="k">none waiting long</span></div>'}
+</div>
+<div class="card"><h2>Learning loop</h2>
+  {row("corrections since last rule review", data.get('corrections_since_last_rule_review'))}
+  {row("last review", data.get('last_rule_review') or "never")}
+  {row("approved rules", data.get('approved_rules'))}
+  {f'<div class="r"><span class="k">⚠ approved rules are not being applied — the active analyst is heuristic, not Claude</span></div>' if data.get("rules_active_but_unused") else ""}
+</div>
+<div class="card"><h2>Errors / warnings (24h)</h2>
+  {row("error log entries", data.get('errors_24h'))}
+  {warn_html or '<div class="r"><span class="k">no warnings</span></div>'}
+</div>
+"""
+
+
 def _decide(path: str, fields: dict) -> dict:
     """Route one edit from the page to the store it belongs to."""
     collection, _, doc_id = path.partition("/")
@@ -488,6 +675,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/collections":
             self._send(200, json.dumps(_documents()).encode("utf-8"),
+                       "application/json")
+            return
+        if self.path == "/health":
+            self._send(200, _health_html(_health()).encode("utf-8"),
+                       "text/html; charset=utf-8")
+            return
+        if self.path == "/api/health":
+            self._send(200, json.dumps(_health()).encode("utf-8"),
                        "application/json")
             return
         self._send(404, b"not found", "text/plain")

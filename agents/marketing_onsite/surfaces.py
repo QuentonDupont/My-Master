@@ -62,6 +62,23 @@ class Surface:
 
 
 SURFACES: dict[str, Surface] = {
+    "category_navigation": Surface(
+        key="category_navigation", label="Category navigation (top nav bar)",
+        platform=BOTH,
+        path="Catalog > Category Navigation",
+        staging=LIVE,
+        staging_control="",
+        sops=(),
+        notes="Confirmed 21 Sep 2026: reorder is drag-and-drop only, no numeric "
+              "position field, so a change here saves live immediately once a "
+              "shop is unlocked from default -- there is no draft state for an "
+              "already-unlocked shop (TH is unlocked; the other 8 default "
+              "markets share one 'All shops' set, itself live for all of them). "
+              "STANDING RULE from the board owner, 21 Sep 2026: a newly added "
+              "navigation item goes at the TOP of the list, not the bottom -- "
+              "for exposure. Apply this by default on every future addition "
+              "unless told otherwise for that specific item.",
+    ),
     "web_hero": Surface(
         key="web_hero",
         label="Homepage hero slider (web)",
