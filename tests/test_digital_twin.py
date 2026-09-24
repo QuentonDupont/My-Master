@@ -29,14 +29,46 @@ def _twin_config(inbox: pathlib.Path, **extra) -> dict:
     return cfg
 
 
+def _shifted_snapshot() -> str:
+    """The fixture's "ts" fields, rewritten relative to the moment the suite
+    runs rather than pinned to 24 Sep 2026 — so it is neither perpetually
+    "too old" (and silently invisible to a 1-day update lookback) nor, if
+    naively shifted a whole calendar day, perpetually "in the future" (and
+    wrongly picked up by every alert poll's `since` check, which has no
+    upper bound). Everything but the calendar event moves to a few hours
+    before "now" — well past the alert pilot's 1-hour first-look window, but
+    inside the morning update's 1-day one. The calendar event is pinned to
+    today's date at a fixed time, matching Asia/Bangkok (the fixture's own
+    time zone) rather than the container's, since the two can differ right
+    around midnight UTC.
+    """
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Asia/Bangkok")
+    now = dt.datetime.now(tz)
+    offsets = {
+        "slack:C0OPS:1758700000.001": now - dt.timedelta(hours=6),
+        "slack:C0OPS:1758700100.002": now - dt.timedelta(hours=5, minutes=50),
+        "gmail:18f2a": now - dt.timedelta(hours=7),
+        "gmail:18f2b": now - dt.timedelta(hours=8),
+        "cal:ev1@2026-09-24T14:00:00+07:00":
+            dt.datetime.combine(now.date(), dt.time(14, 0), tzinfo=tz),
+    }
+    data = json.loads((FIXTURES / "twin_snapshot.json").read_text(encoding="utf-8"))
+    for item in data["items"]:
+        when = offsets[item["id"]]
+        item["ts"] = when.isoformat()
+        if item["id"].startswith("cal:"):
+            item["id"] = f"cal:ev1@{item['ts']}"
+    return json.dumps(data)
+
+
 class _TwinCase(unittest.TestCase):
     def setUp(self):
         self._sb = sandbox()
         self.root = self._sb.__enter__()
         self.inbox = self.root / "inbox"
         self.inbox.mkdir()
-        (self.inbox / "snap.json").write_text(
-            (FIXTURES / "twin_snapshot.json").read_text(encoding="utf-8"), encoding="utf-8")
+        (self.inbox / "snap.json").write_text(_shifted_snapshot(), encoding="utf-8")
         from core import config
         self.cfg = _twin_config(self.inbox)
         self._patch = mock.patch.object(config, "twin", lambda: self.cfg)
@@ -258,9 +290,13 @@ class AlertTests(_TwinCase):
         from agents.digital_twin import alerts, bridge
         alerts.resume()
         r = alerts.test_event("slack", "we decided to go with option B")
-        self.assertEqual(len(r["alerts"]), 1)
-        self.assertEqual(r["alerts"][0]["signals"], ["decision"])
-        self.assertTrue(r["alerts"][0]["text"].startswith("TEST"))
+        # The same poll also surfaces the fixture's calendar event (any event
+        # carries "deadline", and it's legitimately new on its first look) —
+        # this test is about the push path, not about the fixture being quiet.
+        pushed = [a for a in r["alerts"] if a["source"] == "slack"]
+        self.assertEqual(len(pushed), 1)
+        self.assertEqual(pushed[0]["signals"], ["decision"])
+        self.assertTrue(pushed[0]["text"].startswith("TEST"))
         self.assertEqual(bridge.status()["queued"], 0)
         self.assertTrue(bridge.push({"source": "slack", "id": "dup"}))
         self.assertFalse(bridge.push({"source": "slack", "id": "dup"}))

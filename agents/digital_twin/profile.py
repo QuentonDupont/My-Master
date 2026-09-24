@@ -257,7 +257,7 @@ def describe_style(samples: list[str]) -> str:
     traits.append("short sentences" if avg <= 12 else
                   "medium sentences" if avg <= 20 else "long sentences")
     low = text.lower()
-    if any(low.startswith(g) for g in ("hi", "hey", "hello", "morning")):
+    if any(low.startswith(g) for g in ("hi", "hey", "hay", "hello", "morning")):
         traits.append("opens with a greeting")
     else:
         traits.append("no greeting, straight in")
