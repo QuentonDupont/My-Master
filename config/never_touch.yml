@@ -5,7 +5,8 @@ categories:
   refunds:
     keywords: [refund, refunded, chargeback, money back, reimburse, credit note,
                store credit, store credits, raf credit, referral credit,
-               credit points, wallet balance]
+               credit points, wallet balance, perks credit, perk credit,
+               loyalty credit]
   payments:
     keywords: [payment, payment gateway, 2c2p, omise, stripe, paypal, cod amount,
                settlement, transaction failed, double charge, charged twice]

@@ -20,6 +20,39 @@ executed. Verified by reading them back:
 Two PESD1 tickets were deliberately not touched: **10660** (says nothing) and
 **11276** (pricing — never-touch).
 
+### 23 Sep sweep — via the claude.ai Atlassian connector
+
+Approved by the board owner in session, executed through the connector (not
+`execute_proposal`, so none of this is in the local ledger — this table is the
+record). Verified by reading back.
+
+| PESD1 | Action | PRDT | Assignee |
+|---|---|---|---|
+| 11283 IR 3168727 bin | comment (283798) → To Do | — | manual NetSuite fix |
+| 11284 RMA1424188 sync | comment (283799) → To Do | — | Wallop to re-push |
+| 11281 duplicate RMAs | comment (283800) → To Do | — | already done 18 Sep |
+| 11285 franchise PO cost | comment (283801) → To Do | PRDT-11596 (High) | Unni Purushothaman |
+| 11287 MS133049 sizes | comment (283802) → To Do | PRDT-11597 (Critical) | Unni Purushothaman |
+
+Both clones are under epic PRDT-11563, linked with Cloners.
+
+Fix briefs (researched from precedent, PRDT dev comments, Confluence and Slack,
+now in `.claude/skills/pesd1-triage/playbooks.md`) were posted as comments:
+PESD1-11283 (283803), PESD1-11284 (283804), PRDT-11596 (283805),
+PRDT-11597 (283806). The two PESD1 ones were meant as internal notes, but JSM
+comment types are not enabled here, so they are **requester-visible**.
+
+Security: the Superset MCP bearer token has been pasted in plain text in
+several Slack DMs. It should be rotated and kept in Vault only.
+
+Left for the human (never-touch, no comment): **11276** (pricing), **11289**
+(perks credit + customer email — "perks credit" added to never_touch.yml),
+**11279** (set 17 RMAs to Return Received — treated as refund-adjacent; owner
+to confirm whether receiving a return triggers the refund).
+
+Owner chose To Do for 11281 even though the work is complete; it can move to
+Live once the requester confirms.
+
 ## Open, waiting on the board owner
 
 1. **`SLACK_BOT_TOKEN` (xoxb-)** — the one thing preventing the Slack Leader from
