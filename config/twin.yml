@@ -25,10 +25,20 @@ sources:
   # Slack, read as the person via SLACK_USER_TOKEN (their channels and DMs)
   # or as the bot via SLACK_BOT_TOKEN (only channels it was invited to).
   # `channels` is the allowed set. Empty means NOTHING is read — start small.
+  # Picked 24 Sep 2026 by the board owner. Enabled here so the source is ready
+  # the moment a token lands in .env (see HANDOFF.md — the Slack Leader is
+  # waiting on the same SLACK_BOT_TOKEN); until then `lead test slack` reports
+  # it as blocked, on purpose, not silently "working".
   - name: slack
     kind: slack
-    enabled: false
-    channels: []
+    enabled: true
+    channels:
+      - GCFCK3YR1   # #technology_general
+      - GJC681V2M   # #eng_squad_techops
+      - CJ70V4D34   # #ops_x_pm
+      - C01R7L5MFGT # #app_releases
+      - G013BG6B86A # #marketing-teams
+      - G01BAAC780N # #department-monthly-tech
 
   # Gmail, Calendar and Drive need GOOGLE_* in .env (see .env.example).
   # Read-only scopes only; the client has no method that writes.
