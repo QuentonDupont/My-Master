@@ -135,7 +135,13 @@ python3 -m agents.digital_twin.lead test pasted    # prove a source, record it
 make twin-morning      # what changed, what needs me, what is next
 make twin-eod
 make twin-export       # "save my work profile and task list" -> twin/exports/
+make twin-export-system  # the bot system's own profile, for a chat outside the repo
 ```
+
+Two exports, two files: the Work Profile is the person, the system profile is
+the ecosystem (spec, state of play, commands, sources, which credentials are
+set — by name only). Upload both to a Claude Project and the twin works from
+anywhere, no container or session to keep alive.
 
 Sources live in `config/twin.yml` and are off until you enable them; enabled
 is not the same as working — only a passed test marks a source "working" on

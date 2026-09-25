@@ -1,4 +1,4 @@
-.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels tick tick-install mcp connector-install connector-url twin twin-setup twin-morning twin-eod twin-export twin-alerts
+.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels tick tick-install mcp connector-install connector-url twin twin-setup twin-morning twin-eod twin-export twin-alerts twin-export-system
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -87,6 +87,9 @@ twin-eod:  ## end-of-day update
 
 twin-export:  ## "save my work profile and task list" -> one dated file
 	python3 -m agents.digital_twin.lead export
+
+twin-export-system:  ## the bot system's own profile -> one dated file (no secrets)
+	python3 -m agents.digital_twin.lead export-system
 
 twin-alerts:  ## one pass of the live-alert pilot (paused unless resumed)
 	python3 -m agents.digital_twin.alerts once

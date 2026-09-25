@@ -327,6 +327,16 @@ class LeadTests(_TwinCase):
         self.assertNotIn("TOKEN", text)
         self.assertIn("Sources:", lead.status())
 
+    def test_system_export_names_credentials_but_never_values(self):
+        from agents.digital_twin import lead
+        with mock.patch.dict("os.environ", {"SLACK_BOT_TOKEN": "xoxb-verysecretvalue-123"}):
+            text = lead.export_system().read_text(encoding="utf-8")
+        self.assertIn("SLACK_BOT_TOKEN: set", text)
+        self.assertNotIn("verysecretvalue", text)
+        self.assertIn("SPECIFICATION — CLAUDE.md", text)
+        self.assertIn("HANDOFF.md", text)
+        self.assertIn("pasted (file): enabled", text)   # sources come from config/twin.yml
+
 
 if __name__ == "__main__":
     unittest.main()

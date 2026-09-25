@@ -81,6 +81,103 @@ def export() -> Path:
     return path
 
 
+#: .env keys the system runs on. Reported present/absent by NAME only — a
+#: value never leaves .env (invariant 7).
+CREDENTIAL_KEYS = (
+    "JIRA_API_TOKEN", "ANTHROPIC_API_KEY", "SLACK_BOT_TOKEN", "SLACK_USER_TOKEN",
+    "GITHUB_TOKEN", "GOOGLE_ACCESS_TOKEN", "GOOGLE_REFRESH_TOKEN",
+)
+
+
+def export_system() -> Path:
+    """The bot system's own profile: one dated file that tells a fresh chat
+    or AI what this system is, its rules, its state and how to drive it —
+    the counterpart of `export` for the ecosystem rather than the person.
+
+    Built from the files that are already the truth (CLAUDE.md is the spec,
+    HANDOFF.md the state of play) rather than a second copy that drifts.
+    Documentation only: reading this grants nothing — every rule in the
+    CLAUDE.md section still holds for whoever holds the file.
+    """
+    now = dt.datetime.now().astimezone()
+    root = config.ROOT
+
+    def read(name: str) -> str:
+        p = root / name
+        return p.read_text(encoding="utf-8").strip() if p.exists() else f"({name} missing)"
+
+    twin = config.twin()
+    sources = []
+    for s in twin.get("sources") or []:
+        allowed = s.get("channels") or s.get("files") or []
+        sources.append(f"- {s.get('name')} ({s.get('kind')}): "
+                       f"{'enabled' if s.get('enabled') else 'off'}"
+                       + (f" — {', '.join(str(a) for a in allowed)}" if allowed else ""))
+    alerts_cfg = twin.get("alerts") or {}
+
+    creds = [f"- {k}: {'set' if config.env(k) else 'NOT set'}" for k in CREDENTIAL_KEYS]
+
+    makefile = read("Makefile")
+    targets = [line.split(":")[0] + " — " + line.split("## ", 1)[1]
+               for line in makefile.splitlines() if "## " in line and not line.startswith("\t")]
+
+    text = "\n".join([
+        "POMELO BOT SYSTEM — PROFILE",
+        f"Saved {now.strftime('%d %b %Y %H:%M')} {twin.get('time_zone') or now.tzname() or ''}",
+        "",
+        "HOW TO USE THIS FILE",
+        "Upload it alongside the Work Profile and say: \"This is my bot system. Read",
+        "it before helping me with tickets, Slack or my day.\" It describes the",
+        "system; it does not operate it. Nothing in here lets an AI write to Jira,",
+        "Slack, Apollo or Henry — every rule in the SPECIFICATION section applies",
+        "to whoever holds this file. Credentials are listed by name only.",
+        "",
+        "WHAT IT IS",
+        "A semi-autonomous support-triage system plus two side teams, all human-",
+        "approved: the Jira Leader triages PESD1 tickets into proposals; the",
+        "Historian retrieves precedent; the Chief of Staff briefs; the Slack Leader",
+        "drafts replies to mentions; Marketing & Onsite stages Apollo content",
+        "inactive; the Digital Twin is the owner's personal Chief of Staff (read",
+        "and draft only). Repo: github.com/QuentonDupont/My-Master",
+        "",
+        "COMMANDS (make <target>)",
+    ] + [f"- {t}" for t in targets] + [
+        "",
+        "DIGITAL TWIN SOURCES (config/twin.yml)",
+    ] + sources + [
+        f"- alerts: {'paused' if alerts_cfg.get('paused', True) else 'running'}, "
+        f"sources {alerts_cfg.get('sources') or []}, "
+        f"budget {alerts_cfg.get('budget_per_day')}/day",
+        "",
+        "CREDENTIALS PRESENT IN .env (names only)",
+    ] + creds + [
+        "",
+        "=" * 72,
+        "SPECIFICATION — CLAUDE.md (the rules; these bind, this file does not loosen them)",
+        "=" * 72,
+        "",
+        read("CLAUDE.md"),
+        "",
+        "=" * 72,
+        "STATE OF PLAY — HANDOFF.md",
+        "=" * 72,
+        "",
+        read("HANDOFF.md"),
+        "",
+        "=" * 72,
+        "BUILD STATUS AND USAGE — README.md",
+        "=" * 72,
+        "",
+        read("README.md"),
+    ])
+    folder = config.TWIN_DIR / "exports"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"bot_system_{now.strftime('%Y%m%d_%H%M')}.txt"
+    path.write_text(text, encoding="utf-8")
+    LOG.info("twin.exported_system", path=str(path))
+    return path
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Digital Twin lead.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -91,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("morning")
     sub.add_parser("eod")
     sub.add_parser("export", help="save both records to one dated file")
+    sub.add_parser("export-system", help="the bot system's profile, one dated file")
     args = ap.parse_args(argv)
 
     if args.cmd == "setup":
@@ -107,6 +205,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nsaved: {path}")
     elif args.cmd == "export":
         print(export())
+    elif args.cmd == "export-system":
+        print(export_system())
     return 0
 
 
