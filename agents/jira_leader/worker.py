@@ -65,6 +65,40 @@ def _new_proposal(issue: dict, **kw) -> proposals.Proposal:
     )
 
 
+def fixed_route(issue: dict) -> dict | None:
+    """The configured route this ticket belongs to, if any."""
+    summary = (issue.get("fields", {}) or {}).get("summary") or ""
+    for route in config.boards().get("fixed_routes") or []:
+        prefix = route.get("summary_prefix")
+        if prefix and summary.strip().lower().startswith(prefix.lower()):
+            return route
+    return None
+
+
+def _routed_proposal(issue: dict, restated: str, route: dict) -> proposals.Proposal:
+    fields = issue.get("fields", {}) or {}
+    priority, _why, _flags = analysis_mod.clone_priority(issue)
+    return _new_proposal(
+        issue, requirement_restated=restated,
+        requester=proposals.Requester(),
+        classification=proposals.NEEDS_CODE, confidence=1.0,
+        proposed_comment=route["comment"],
+        clone=proposals.Clone(
+            target_project=config.dev_project(),
+            summary=fields.get("summary") or "",
+            # Unedited below the rule, so validation can tell it from our line.
+            description=(f"Copied unchanged from {issue['key']}.\n\n----\n\n"
+                         f"{fields.get('description') or ''}"),
+            assignee=route["assignee"],
+            assignee_reason=f"fixed route '{route['name']}' (config/boards.yml)",
+            assignee_alternates=[route["assignee"]],
+            labels=list(route["labels"]),
+            priority=priority,
+            link_type=config.boards()["development"]["link_type"]),
+        pesd1_transition=config.boards()["intake"]["dev_transition"],
+        flags=[f"route:{route['name']}", "requester_unknown"])
+
+
 def _finish(led: ledger_mod.Ledger, proposal: proposals.Proposal, state: str,
             reason: str) -> Outcome:
     problems = proposals.validate(proposal.to_dict())
@@ -118,6 +152,14 @@ def process(issue: dict, *, ledger: ledger_mod.Ledger | None = None,
                       + ["requester_unknown"])
             return _finish(led, proposal, ledger_mod.ESCALATED,
                            f"never-touch: {', '.join(categories)}")
+
+        # 3b. fixed routes — handling already decided by the board owner. Runs
+        # before the duplicate check: each alert is its own crash, however alike
+        # the summaries look.
+        route = fixed_route(issue)
+        if route:
+            return _finish(led, _routed_proposal(issue, restated, route),
+                           ledger_mod.PROPOSED, f"fixed route: {route['name']}")
 
         # 4. duplicate check — a duplicate is never cloned
         research = hist.research(key, summary, description)

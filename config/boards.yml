@@ -61,8 +61,22 @@ development:
   epic_by_component:
     netsuite: PRDT-10732      # NetSuite Support Tickets
     api: PRDT-10842           # [API] API bugs and incidents
+    business_continuity: PRDT-11608  # [Crashlytics] Fatal crash alerts
   # PESD1 Support Escalations — created for triage-raised work.
   default_epic: PRDT-11563
+
+# Ticket families the board owner has already decided how to handle. A match
+# skips duplicate search, the analyst and developer routing: the clone copies the
+# PESD1 summary and description verbatim, with the labels and assignee below.
+# It is still only a proposal — a human approves it like any other.
+# The first label picks the epic via development.epic_by_component.
+fixed_routes:
+  - name: crashlytics
+    # Firebase integration alerts, e.g. PESD1-11298 (decided 28 Sep 2026)
+    summary_prefix: "[Crashlytics]"
+    labels: [business_continuity, tech_ops]
+    assignee: Rahul Ravindra
+    comment: "This is an automated Crashlytics crash alert. It has been passed to the Android team as a development ticket, linked here."
 
 # Hard allowlist. core/jira_client.py refuses any key outside this list.
 allowed_projects:
