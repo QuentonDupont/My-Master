@@ -127,6 +127,31 @@ https://pomelofashion.atlassian.net/wiki/spaces/henry/pages/2379939842
 *Looks like:* "The return order is not syncing", "RMAxxxx still incorrect
 status", "not updated in Superset". From TH Ops.
 
+**Step 0: check the sync on BOTH platforms before any fix** (the board
+owner's process, taught on PESD1-11282, 28 Sep 2026). Many of these are
+already synced by the time we look. For every RMA in the ticket (the numbers
+are in *Steps to reproduce*; don't ask the requester for them):
+- **NetSuite:** global search `RMA<number>`. Synced = a **Return
+  Authorization RMA<number>** exists (created by *Pomelo Integration*). A
+  **Credit Memo CN-TH-…** for the same customer means the refund side ran too.
+  Read-only URL, works from the owner's logged-in Chrome:
+  `system.netsuite.com/app/common/search/ubersearchresults.nl?quicksearch=T&searchtype=Uber&frame=be&Uber_NAMEtype=KEYWORDSTARTSWITH&Uber_NAME=RMA<number>`
+- **Apollo:** Orders › Merchandise Returns › Edit, where `id_order_return` =
+  the RMA number without "RMA". Synced = the **NetSuite Info** box shows
+  **Sync Status: Yes**, with the RMA number and an updated date. Note the
+  Return Status too (e.g. *Return Received*). A deep link lands on
+  PrestaShop's "Invalid security token" page, and the auto-mode classifier
+  blocks clicking through it. Reach the page through the admin menu, or
+  have the owner check it.
+
+Then:
+- **Synced on both** → comment "Completed" with the evidence for each RMA
+  (Apollo sync status + date, NetSuite RA + credit memo numbers; screenshots
+  if you have them), then move the ticket to **Live**. No fix needed.
+- **Synced on only one platform** → **stop. Don't attempt a fix.** Tell the
+  board owner which RMA is missing where; he resolves these himself.
+- **On neither** → the Fix below.
+
 **Fix**
 1. Apollo admin, open the return:
    `apollo.pomelofashion.com/sp/index.php?controller=AdminReturn&updateorder_return&id_order_return=<id>`
@@ -183,6 +208,8 @@ What we can check a ticket against, and from where. Read-only, always.
 | Superset UI `superset.pomelofashion.com` | same data, as dashboards (e.g. slice 1988 for returns) | no: SSO login plus proxy |
 | NetSuite SuiteAnalytics Connect (ENG 2907668483, draft) | SuiteQL | no: personal login only, no service account |
 | Apollo / Henry admin, production DBs | record state | no, and **by design** (invariant 2; SSH per engineer) |
+| NetSuite UI via the owner's Chrome (local session only) | RMA / credit memo exists (global search) | local Mac session: **yes, read-only** (verified 28 Sep 2026 on RMA1430328). Never edit or save a record |
+| Apollo admin via the owner's Chrome (local session only) | return's NetSuite Info sync status | local: blocked. A deep link hits "Invalid security token" and the classifier refuses the click-through (28 Sep 2026). Owner checks, or grants permission |
 | GitHub `pomelofashion/*` (repos.yml) | which commit/PR fixed a ticket | partly: needs `add_repo` for the org |
 
 **To turn on live check-ups:** the owner adds `superset-mcp-th.pmlo.co` to
