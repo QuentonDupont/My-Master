@@ -285,6 +285,28 @@ class JiraWriteClient(_Base):
         LOG.info("jira.write", action=action, **detail)
         return result
 
+    # -- board order -------------------------------------------------------
+    def rank_issues(self, keys: list[str], *, before: str | None = None,
+                    after: str | None = None, rank_field: int | None = None) -> dict:
+        """Move `keys` (in this order, max 50) before or after one issue.
+
+        Its own undo: re-rank the recorded prior order the same way.
+        """
+        if bool(before) == bool(after):
+            raise ValueError("rank_issues needs exactly one of before= / after=")
+        if not keys or len(keys) > 50:
+            raise ValueError("rank_issues takes 1-50 keys per call")
+        for key in [*keys, before or after]:
+            assert_key_allowed(key)
+        body: dict = {"issues": list(keys)}
+        body["rankBeforeIssue" if before else "rankAfterIssue"] = before or after
+        if rank_field:
+            body["rankCustomFieldId"] = rank_field
+        return self._do("rank_issues", {"keys": list(keys), "before": before,
+                                        "after": after},
+                        lambda: self._request("PUT", "/rest/agile/1.0/issue/rank",
+                                              body=body))
+
     # -- comments ----------------------------------------------------------
     def add_comment(self, key: str, body: str) -> dict:
         assert_key_allowed(key)

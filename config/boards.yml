@@ -65,6 +65,14 @@ development:
   # PESD1 Support Escalations — created for triage-raised work.
   default_epic: PRDT-11563
 
+# Boards kept in priority order by core/board_rank.py (Critical > High > Medium
+# > Low, existing order kept within a priority). rank_field is the board's
+# ranking.rankCustomFieldId from its configuration.
+rank_boards:
+  - id: 347
+    name: Tech Ops
+    rank_field: 10011
+
 # Ticket families the board owner has already decided how to handle. A match
 # skips duplicate search, the analyst and developer routing: the clone copies the
 # PESD1 summary and description verbatim, with the labels and assignee below.
