@@ -50,7 +50,7 @@ from core import config  # noqa: E402
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 SCOPE = "https://mail.google.com/"
-PORT = 8765 + 17  # unlikely to collide with the panel on 8765
+PORT = 8765 + 17  # unlikely to collide with other local services
 
 
 class _CodeCatcher(BaseHTTPRequestHandler):

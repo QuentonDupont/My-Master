@@ -1,4 +1,4 @@
-.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels tick tick-install corpus-refresh corpus-refresh-install mcp connector-install connector-url
+.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply labels tick tick-install corpus-refresh corpus-refresh-install mcp connector-install connector-url
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -60,9 +60,6 @@ connector-url:  ## the permanent connector URL, and whether it answers
 
 mcp:  ## MCP server for the Claude app connector (needs MCP_AUTH_TOKEN)
 	python3 -m tools.mcp_server --host $(or $(HOST),127.0.0.1)
-
-panel:  ## review page served from this machine (add HOST=0.0.0.0 for your phone)
-	python3 -m tools.panel --host $(or $(HOST),127.0.0.1)
 
 tick:  ## one board pass: sweep, read labels, mirror status
 	./tools/board_tick.sh

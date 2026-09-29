@@ -21,7 +21,7 @@ LOG = log.get("chief_of_staff")
 #: past this means the launchd job died silently, not that it is just quiet.
 STALE_AFTER = dt.timedelta(hours=2)
 
-LAUNCHD_JOBS = ("com.pomelo.panel", "com.pomelo.mcp", "com.pomelo.daily_report")
+LAUNCHD_JOBS = ("com.pomelo.mcp", "com.pomelo.daily_report")
 
 
 def _now() -> dt.datetime:
