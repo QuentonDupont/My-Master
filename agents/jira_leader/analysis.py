@@ -168,13 +168,40 @@ def _resolution_hint(doc: dict) -> str:
     return parts[-1] if parts else ""
 
 
+#: Module-level, not per-instance: HeuristicAnalyst is constructed fresh per
+#: worker, so an instance flag would warn on every single ticket. A fresh
+#: `python3 -m agents.jira_leader.queue run` process (what board_tick.sh
+#: actually spawns each tick) gets exactly one warning per run instead.
+_warned_rules_ignored = False
+
+
 class HeuristicAnalyst:
-    """Deterministic classifier. Explains itself; never pretends to know more."""
+    """Deterministic classifier. Explains itself; never pretends to know more.
+
+    It does NOT apply knowledge/rules.md — see analyse() below. That is a
+    known, deliberate gap: teaching a keyword heuristic to mechanically apply
+    free-text, human-authored rules ("reclassify NEEDS_CODE -> ANSWERABLE
+    unless a dev change is actually required") is a real design decision, not
+    a bug fix, and it is not attempted here. What IS done here is making the
+    gap loud instead of silent — approved rules going quietly unused was found
+    live: 2 rules approved into rules.md while every worker ran on the
+    heuristic, unset ANTHROPIC_API_KEY.
+    """
 
     name = "heuristic"
 
     def analyse(self, issue: dict, retrieval, restated: str,
                 rules_text: str = "") -> Analysis:
+        global _warned_rules_ignored
+        if rules_text.strip() and not _warned_rules_ignored:
+            _warned_rules_ignored = True
+            LOG.warn("analysis.rules_ignored_by_heuristic",
+                     detail="knowledge/rules.md has approved content but the "
+                            "heuristic analyst cannot apply it — only "
+                            "ClaudeAnalyst reads rules_text. Set "
+                            "ANTHROPIC_API_KEY, or treat the approved rules as "
+                            "documentation only until then.")
+
         text = _blob(issue).lower()
         failures = [s for s in FAILURE_SIGNALS if s in text]
         question = (any(q in text for q in QUESTION_SIGNALS) and "?" in text)
@@ -417,6 +444,18 @@ def load_rules() -> str:
     if config.RULES_MD.exists():
         return config.RULES_MD.read_text(encoding="utf-8")
     return ""
+
+
+def count_approved_rules(rules_text: str | None = None) -> int:
+    """How many actual rules are in rules.md, not just placeholder text.
+
+    A bullet line ("- Default to ANSWERABLE...") is an approved rule; the
+    template's "_None approved yet._" and its `<!-- example -->` comments are
+    not. Used to decide whether the heuristic-ignores-rules gap above is
+    hypothetical or currently affecting real proposals.
+    """
+    text = load_rules() if rules_text is None else rules_text
+    return sum(1 for line in text.splitlines() if line.strip().startswith("- "))
 
 
 def main(argv: list[str] | None = None) -> int:

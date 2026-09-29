@@ -39,7 +39,7 @@ def sandbox():
             "LEDGER_DB": config.LEDGER_DB, "CORPUS_DB": config.CORPUS_DB,
             "REVIEW_DIR": config.REVIEW_DIR, "LOG_DIR": config.LOG_DIR,
             "CORRECTIONS": config.CORRECTIONS, "KNOWLEDGE_DIR": config.KNOWLEDGE_DIR,
-            "STORE": proposals.STORE,
+            "RULES_MD": config.RULES_MD, "STORE": proposals.STORE,
         }
         config.LEDGER_DB = root / "ledger.db"
         config.CORPUS_DB = root / "corpus.db"
@@ -47,6 +47,12 @@ def sandbox():
         config.LOG_DIR = root / "logs"
         config.KNOWLEDGE_DIR = root / "knowledge"
         config.CORRECTIONS = root / "knowledge" / "corrections.jsonl"
+        # RULES_MD = KNOWLEDGE_DIR / "rules.md" is computed once at import time
+        # in core/config.py, so reassigning KNOWLEDGE_DIR above does NOT move
+        # it — it silently keeps pointing at the real repo's rules.md unless
+        # redirected here too. Found live: a sandboxed test reading approved
+        # rules picked up the real 2 approved rules from the actual repo.
+        config.RULES_MD = root / "knowledge" / "rules.md"
         proposals.STORE = root / "review" / "proposals"
         for d in (config.REVIEW_DIR, config.LOG_DIR, config.KNOWLEDGE_DIR,
                   proposals.STORE):

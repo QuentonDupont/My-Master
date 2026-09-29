@@ -389,6 +389,54 @@ def undo(ticket_key: str, *, execute: bool = False,
             led.close()
 
 
+def create_dev_ticket(summary: str, description: str, *, assignee: str | None = None,
+                      labels: list[str] | None = None, priority: str = "Medium",
+                      epic: str | None = None, issue_type: str | None = None,
+                      execute: bool = False,
+                      writer: JiraWriteClient | None = None,
+                      reader: JiraReadClient | None = None) -> dict:
+    """A standalone PRDT ticket the human is directing by hand — not a triage
+    clone, not raised from a PESD1 ticket. Same rationale as create_epic: ticket
+    creation has no sanctioned automated path (CLAUDE.md), so this is a
+    deliberate, explicitly human-authorized one-off, run through the single
+    write module so there is still exactly one file that can write to Jira.
+
+    `epic` is required by PRDT's own Story screen (discovered by trial, not
+    documented by createmeta — see clone_fields()); pass one explicitly rather
+    than guessing from a component, since this ticket has no component label
+    to map from the way a triage clone does.
+    """
+    dev = config.boards()["development"]
+    project = config.dev_project()
+    reader = reader or JiraReadClient()
+    writer = writer or JiraWriteClient(execute=execute)
+    it = issue_type or config.dev_issue_type()
+
+    fields = dict(dev.get("required_fields") or {})
+    epic_field = dev.get("epic_link_field")
+    epic_key = epic or dev.get("default_epic")
+    if epic_field and epic_key:
+        fields[epic_field] = epic_key
+    elif epic_field:
+        raise ExecutionRefused(f"{project} requires an epic on a {it} and none "
+                               f"was given or configured as a default")
+
+    created = writer.create_issue(
+        project, summary, description, issue_type=it,
+        labels=labels or [], priority=priority,
+        extra_fields=screen_fields(fields, it, reader) if execute else fields)
+    key = created.get("key")
+
+    account_id = None
+    if assignee and execute and key:
+        account_id = _resolve_account_id(reader, assignee)
+        writer.assign(key, account_id)
+    LOG.info("execute.create_dev_ticket", project=project, key=key,
+             assignee=assignee, epic=epic_key, dry_run=not execute)
+    return {"key": key, "epic": epic_key, "assignee": assignee,
+           "account_id": account_id, "created": created}
+
+
 def create_epic(summary: str, *, description: str = "", execute: bool = False,
                 writer: JiraWriteClient | None = None) -> dict:
     """Create the epic that support-escalation clones hang under.

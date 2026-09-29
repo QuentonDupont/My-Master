@@ -1,8 +1,23 @@
+import contextlib
 import unittest
 
 from core import execute as E, ledger as L, proposals as P
 from tests.helpers import sandbox
 from tests.test_proposals import base, clone
+
+
+@contextlib.contextmanager
+def _patched_boards(data: dict):
+    """Temporarily replace config.boards() with a fixed dict, restoring
+    whatever it was (sandbox()'s fixture loader, typically) on exit."""
+    from core import config
+
+    saved = config.boards
+    config.boards = lambda: data
+    try:
+        yield
+    finally:
+        config.boards = saved
 
 
 class FakeWriter:
@@ -69,6 +84,11 @@ class FakeReader:
     def find_users(self, query):
         return [{"accountId": "acc-1", "displayName": query,
                  "emailAddress": "dev@pomelofashion.com"}]
+
+    def creatable_fields(self, project, issue_type):
+        # Empty means "no screen metadata available" to screen_fields(), which
+        # then keeps every field rather than filtering any of them out.
+        return {}
 
 
 def approved_proposal(led, classification="NEEDS_CODE"):
@@ -258,6 +278,80 @@ class ExecuteTests(unittest.TestCase):
                     E.execute_proposal(proposal.proposal_id, execute=True, ledger=led,
                                        writer=FakeWriter(execute=False),
                                        reader=FakeReader())
+
+
+class CreateDevTicketTests(unittest.TestCase):
+    """core.execute.create_dev_ticket — a standalone, explicitly
+    human-directed ticket, not a triage clone. Real use: PRDT-11591.
+
+    tests/fixtures/boards.yml deliberately disables the whole epic mechanism
+    (epic_link_field: "") so other tests aren't tripped by it — these tests
+    need it ON to test anything meaningful about it, so they patch
+    config.boards() directly rather than relying on the ambient fixture.
+    """
+
+    def _with_epic_config(self, default_epic: str = "PRDT-11563"):
+        from core import config
+
+        base = config.boards()
+        patched = dict(base)
+        patched["development"] = dict(base["development"],
+                                      epic_link_field="customfield_10008",
+                                      default_epic=default_epic)
+        return _patched_boards(patched)
+
+    def test_dry_run_carries_labels_priority_and_the_configured_epic(self):
+        with sandbox(), self._with_epic_config():
+            writer = FakeWriter()
+            out = E.create_dev_ticket(
+                "a real ask", "a real description", assignee="Wallop",
+                labels=["business_continuity", "tech_ops"], priority="Medium",
+                execute=False, writer=writer, reader=FakeReader())
+            self.assertEqual(out["epic"], "PRDT-11563")
+            # dry run never resolves or assigns anyone, even with assignee set
+            self.assertIsNone(out["account_id"])
+            self.assertEqual([c[0] for c in writer.calls], ["clone"])
+            # dev.issue_type from the fixture, not hardcoded — this is
+            # exercising create_dev_ticket's mechanics, not asserting a
+            # specific board's configured issue type.
+            from core import config
+
+            self.assertEqual(writer.calls[0][1]["issue_type"],
+                             config.dev_issue_type())
+
+    def test_an_explicit_epic_overrides_the_default(self):
+        with sandbox(), self._with_epic_config(default_epic="PRDT-1"):
+            out = E.create_dev_ticket(
+                "ask", "desc", epic="PRDT-9999", execute=False,
+                writer=FakeWriter(), reader=FakeReader())
+            self.assertEqual(out["epic"], "PRDT-9999")
+
+    def test_no_epic_and_no_default_is_refused(self):
+        with sandbox(), self._with_epic_config(default_epic=""):
+            with self.assertRaises(E.ExecutionRefused):
+                E.create_dev_ticket("ask", "desc", execute=False,
+                                    writer=FakeWriter(), reader=FakeReader())
+
+    def test_execute_creates_and_assigns(self):
+        with sandbox(), self._with_epic_config():
+            writer = FakeWriter()
+            out = E.create_dev_ticket(
+                "ask", "desc", assignee="Wallop", labels=["tech_ops"],
+                execute=True, writer=writer, reader=FakeReader())
+            self.assertEqual(out["key"], "PRDT-999")  # FakeWriter's fixed key
+            self.assertEqual(out["account_id"], "acc-1")
+            names = [c[0] for c in writer.calls]
+            self.assertEqual(names, ["clone", "assign"])
+
+    def test_no_epic_mechanism_configured_creates_without_one(self):
+        """The fixture's default state: epic_link_field is empty, so no epic
+        is required at all — this must succeed cleanly, not refuse."""
+        with sandbox():
+            writer = FakeWriter()
+            out = E.create_dev_ticket("ask", "desc", execute=False,
+                                      writer=writer, reader=FakeReader())
+            self.assertEqual([c[0] for c in writer.calls], ["clone"])
+            self.assertEqual(out["epic"], "")
 
 
 if __name__ == "__main__":

@@ -76,14 +76,34 @@ def cost(days: int = 7) -> dict:
             "note": "0 when the heuristic analyst is in use — it costs nothing."}
 
 
+def _all_logger_names() -> list[str]:
+    """Every logger that has actually written a file, not a hand-kept list.
+
+    A hardcoded tuple here drifts the moment a new module calls log.get(...) —
+    it did: brief.errors() scanned 5 loggers while 29 exist, so failures in
+    jira_leader (where the queue's own errors land), slack_*, mcp, requester
+    and everything else were never counted in the one place meant to surface
+    them.
+    """
+    if not config.LOG_DIR.is_dir():
+        return []
+    return sorted(p.stem for p in config.LOG_DIR.glob("*.jsonl"))
+
+
 def errors(days: int = 7) -> dict:
     since = dt.datetime.utcnow() - dt.timedelta(days=days)
     with ledger_mod.Ledger() as led:
         stuck = [r for r in led.by_state() if r["last_error"]]
         retried = [r for r in led.by_state() if (r["attempts"] or 0) > 1]
     log_errors = []
-    for name in ("worker", "execute", "jira", "ledger", "analysis"):
-        log_errors += [r for r in _read_log(name, since) if r.get("level") == "ERROR"]
+    warn_by_logger: dict[str, int] = {}
+    for name in _all_logger_names():
+        records = _read_log(name, since)
+        log_errors += [r for r in records if r.get("level") == "ERROR"]
+        warns = sum(1 for r in records if r.get("level") == "WARN")
+        if warns:
+            warn_by_logger[name] = warns
+    log_errors.sort(key=lambda r: r.get("ts", ""))
     return {
         "tickets_with_last_error": [
             {"ticket": r["ticket_key"], "state": r["state"], "attempts": r["attempts"],
@@ -91,6 +111,11 @@ def errors(days: int = 7) -> dict:
         "retried_tickets": [r["ticket_key"] for r in retried],
         "log_errors": [{"ts": r["ts"], "logger": r["logger"], "event": r["event"]}
                        for r in log_errors[-20:]],
+        "total_errors": len(log_errors),
+        # WARN is never fatal but a spike is a sign something is degrading
+        # silently (a token nearing expiry, a rate limit) — surfaced as counts
+        # per logger rather than every line, or this drowns the brief.
+        "warn_by_logger": dict(sorted(warn_by_logger.items(), key=lambda kv: -kv[1])),
     }
 
 
@@ -216,13 +241,18 @@ def render(data: dict) -> str:
         out.append("")
 
     errs = data["errors"]
-    if errs["tickets_with_last_error"] or errs["log_errors"]:
+    if errs["tickets_with_last_error"] or errs["log_errors"] or errs["warn_by_logger"]:
         out += ["## Errors", ""]
         for item in errs["tickets_with_last_error"]:
             out.append(f"- {item['ticket']} ({item['state']}, {item['attempts']} attempts) "
                        f"— {item['error']}")
         if errs["log_errors"]:
-            out.append(f"- {len(errs['log_errors'])} error log entries in the last 7 days")
+            out.append(f"- {errs['total_errors']} error log entries in the last 7 days "
+                       f"(across {config.LOG_DIR})")
+        if errs["warn_by_logger"]:
+            top = ", ".join(f"{n} ({c})" for n, c in
+                            list(errs["warn_by_logger"].items())[:5])
+            out.append(f"- warnings piling up in: {top}")
         out.append("")
     else:
         out += ["## Errors", "", "None.", ""]

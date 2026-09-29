@@ -94,6 +94,9 @@ def run(source, *, max_workers: int = MAX_WORKERS,
     claimed, skipped = [], []
     with ledger_mod.Ledger() as led:
         slack_led = ledger_mod.SlackLedger(led)
+        reclaimed = slack_led.reclaim_stale_claims()
+        if reclaimed:
+            LOG.warn("slack_leader.reclaimed_stale", threads=reclaimed)
         for mention in mentions:
             key = slack_led.key(mention["channel"], mention["thread_ts"])
             hash_ = ledger_mod.thread_hash(mention.get("messages") or [])

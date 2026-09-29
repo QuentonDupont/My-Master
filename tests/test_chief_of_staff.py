@@ -23,6 +23,34 @@ class RuleProposalTests(unittest.TestCase):
             self.assertEqual([r for r in rules_mod.cluster() if r["kind"] == "routing"],
                              [])
 
+    def test_a_clone_dropped_by_reclassification_is_not_a_routing_rule(self):
+        """core.proposals.diff() now recurses when a clone dict drops to None,
+        so this correction lands as field="clone.assignee" with became=None —
+        exactly the shape a NEEDS_CODE -> ANSWERABLE edit produces. Without a
+        guard this used to (would) propose 'Route these to **None**'."""
+        with sandbox():
+            for i in range(3):
+                corrections.record(f"p_010{i}", "clone.assignee",
+                                   "Vishal Gaikwad", None,
+                                   "reclassified to ANSWERABLE, no clone needed")
+            routing = [r for r in rules_mod.cluster() if r["kind"] == "routing"]
+            self.assertEqual(routing, [])
+
+    def test_a_genuine_reassignment_among_dropped_clones_still_clusters(self):
+        """Real None-became corrections and real reassignments can land in the
+        same field bucket; only the reassignments should surface."""
+        with sandbox():
+            for i in range(2):
+                corrections.record(f"p_020{i}", "clone.assignee",
+                                   "Vishal Gaikwad", None, "dropped")
+            for i in range(2):
+                corrections.record(f"p_021{i}", "clone.assignee",
+                                   "Pim Wattana", "Somchai Prasert", "on leave")
+            routing = [r for r in rules_mod.cluster() if r["kind"] == "routing"]
+            self.assertEqual(len(routing), 1)
+            self.assertIn("Somchai Prasert", routing[0]["rule"])
+            self.assertNotIn("None", routing[0]["rule"])
+
     def test_phrasing_edits_are_clustered(self):
         with sandbox():
             for i in range(2):

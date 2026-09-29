@@ -55,6 +55,9 @@ def run(source: TicketSource, *, limit: int | None = None,
     claimed: list[dict] = []
     skipped: list[dict] = []
     with ledger_mod.Ledger() as led:
+        reclaimed = led.reclaim_stale_claims()
+        if reclaimed:
+            LOG.warn("queue.reclaimed_stale", tickets=reclaimed)
         for issue in issues:
             key = issue["key"]
             status = ((issue.get("fields", {}) or {}).get("status") or {}).get("name", "")

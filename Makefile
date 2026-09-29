@@ -1,4 +1,4 @@
-.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels tick tick-install mcp connector-install connector-url
+.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels tick tick-install corpus-refresh corpus-refresh-install mcp connector-install connector-url
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -6,7 +6,8 @@ help:
 test:  ## run the test suite (stdlib unittest, no network)
 	python3 -m unittest discover -s tests -t . -v
 
-demo: demo-reset  ## full offline run: corpus -> triage -> review batch -> brief
+demo:  ## full offline run: wipes local demo state, then corpus -> triage -> review batch -> brief
+	@$(MAKE) demo-reset CONFIRM=1
 	./tools/seed_demo.sh
 	python3 -m agents.jira_leader.queue run \
 		--file tests/fixtures/inbox.jsonl \
@@ -14,11 +15,22 @@ demo: demo-reset  ## full offline run: corpus -> triage -> review batch -> brief
 	python3 -m agents.jira_leader.batch assemble
 	python3 -m agents.chief_of_staff.brief brief
 
-demo-reset:  ## wipe local state (ledger, proposals, batches, logs)
+# demo-reset wipes corpus/ledger.db — the SAME file board_tick.sh writes to
+# every 5 minutes on the live system. It no longer touches logs/*.jsonl: those
+# are now operational history (execution_log, corrections timing), not demo
+# fixtures, and a demo run should not be able to erase them. Requires
+# CONFIRM=1 so it can't be triggered by a bare `make demo-reset` typo once
+# there is a live ledger worth losing.
+demo-reset:  ## wipe local state (ledger, proposals, batches) — needs CONFIRM=1
+	@if [ "$(CONFIRM)" != "1" ]; then \
+		echo "demo-reset deletes corpus/ledger.db — the live board state if"; \
+		echo "this system is running against real Jira, not just a demo."; \
+		echo "Re-run as: make demo-reset CONFIRM=1"; \
+		exit 1; \
+	fi
 	rm -f corpus/ledger.db corpus/ledger.db-wal corpus/ledger.db-shm
 	rm -rf review/proposals review/slack_proposals review/batch_* review/brief_*
 	rm -rf review/rule_proposals_* review/mobile
-	rm -f logs/*.jsonl
 
 queue:  ## poll PESD1 and triage (live; needs .env)
 	python3 -m agents.jira_leader.queue run
@@ -57,6 +69,12 @@ tick:  ## one board pass: sweep, read labels, mirror status
 
 tick-install:  ## run that pass every 5 minutes via launchd
 	./tools/install_tick.sh
+
+corpus-refresh:  ## catch tickets updated recently and reindex (read-only)
+	./tools/corpus_refresh.sh
+
+corpus-refresh-install:  ## run that pass every 2 hours via launchd
+	./tools/install_corpus_refresh.sh
 
 labels:  ## read triage-approved / triage-rejected labels off the board
 	python3 -m agents.jira_leader.labels poll $(APPLY)

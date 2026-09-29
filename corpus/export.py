@@ -26,17 +26,65 @@ JIRA_FIELDS = ["summary", "description", "status", "resolution", "created", "upd
                "comment", "issuelinks"]
 
 
-def export_jira(project: str, months: int = 18, limit: int | None = None) -> int:
+def export_jira(project: str, months: int = 18, limit: int | None = None,
+                updated_since_days: int | None = None, merge: bool = False) -> int:
+    """Export a project's issues to corpus/raw/{project}.jsonl.
+
+    Two modes:
+      * default — `created >= -{months*30}d`, overwrites the file. This is the
+        initial/periodic full pull.
+      * `updated_since_days` — `updated >= -Nd` instead, catching a ticket
+        touched recently (a new comment, a status change, a resolution)
+        REGARDLESS of how old it is. `created` alone can never see this: a
+        ticket opened 5 months ago that was just resolved keeps its old
+        `created` date forever, so a created-only filter — including a full
+        `--months` re-pull — never re-fetches it, and its resolution note
+        (exactly the evidence Historian's duplicate/precedent matching wants)
+        stays permanently stale. Pass `merge=True` with this mode: it reads
+        the existing file, overlays the freshly-fetched issues by key, and
+        writes the union back — a short incremental window must not silently
+        truncate the file down to just that window (plain overwrite would
+        discard everything outside it, including the full ticket history).
+    """
     client = JiraReadClient()
-    jql = (f"project = {project} AND created >= -{months * 30}d "
-           f"ORDER BY created DESC")
+    if updated_since_days is not None:
+        jql = (f"project = {project} AND updated >= -{updated_since_days}d "
+               f"ORDER BY updated DESC")
+    else:
+        jql = (f"project = {project} AND created >= -{months * 30}d "
+               f"ORDER BY created DESC")
     issues = client.search(jql, fields=JIRA_FIELDS, limit=limit)
     RAW.mkdir(parents=True, exist_ok=True)
     out = RAW / f"{project.lower()}.jsonl"
+
+    if merge and out.exists():
+        by_key: dict[str, dict] = {}
+        for line in out.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                existing = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            key = existing.get("key")
+            if key:
+                by_key[key] = existing
+        for issue in issues:
+            by_key[issue["key"]] = issue
+        merged = list(by_key.values())
+        with out.open("w", encoding="utf-8") as fh:
+            for issue in merged:
+                fh.write(json.dumps(issue, ensure_ascii=False) + "\n")
+        LOG.info("export.jira", project=project, fetched=len(issues),
+                 total_after_merge=len(merged), path=str(out), mode="merge")
+        return len(merged)
+
     with out.open("w", encoding="utf-8") as fh:
         for issue in issues:
             fh.write(json.dumps(issue, ensure_ascii=False) + "\n")
-    LOG.info("export.jira", project=project, issues=len(issues), path=str(out))
+    LOG.info("export.jira", project=project, issues=len(issues), path=str(out),
+             mode="overwrite")
     return len(issues)
 
 
@@ -166,6 +214,10 @@ def main(argv: list[str] | None = None) -> int:
     p_j.add_argument("--project", default=config.intake_project())
     p_j.add_argument("--months", type=int, default=18)
     p_j.add_argument("--limit", type=int)
+    p_j.add_argument("--updated-since-days", type=int, default=None,
+                     help="incremental refresh: catch tickets updated in the "
+                          "last N days regardless of creation date; merges "
+                          "into the existing file instead of overwriting it")
     p_c = sub.add_parser("confluence")
     p_c.add_argument("--space")
     p_c.add_argument("--limit", type=int)
@@ -176,7 +228,9 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.cmd == "jira":
-        print(export_jira(args.project, args.months, args.limit))
+        print(export_jira(args.project, args.months, args.limit,
+                          updated_since_days=args.updated_since_days,
+                          merge=args.updated_since_days is not None))
     elif args.cmd == "confluence":
         print(export_confluence(args.space, args.limit))
     elif args.cmd == "github":

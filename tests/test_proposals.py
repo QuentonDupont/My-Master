@@ -119,6 +119,19 @@ class ProposalValidationTests(unittest.TestCase):
         finally:
             config._secrets.discard("super-secret-token-value")
 
+    def test_comment_may_not_cite_a_ticket_outside_scope(self):
+        """The exact failure a rejection in corrections.jsonl was for: the
+        drafted comment cited MUL/PRTR-751 as a similar ticket. core/
+        slack_proposals.py already carried this check for a Slack reply."""
+        problems = P.validate(base(
+            proposed_comment="This is the same as PRTR-751, see there."))
+        self.assertTrue(any("PRTR-751" in p and "outside" in p for p in problems))
+
+    def test_comment_may_cite_in_scope_tickets(self):
+        problems = P.validate(base(
+            proposed_comment="See PRDT-100 for the fix, or PESD1-2 for context."))
+        self.assertEqual(problems, [])
+
     def test_roundtrip_and_ids(self):
         with sandbox():
             p = P.Proposal.from_dict(base())
@@ -134,7 +147,28 @@ class ProposalValidationTests(unittest.TestCase):
         after["proposed_comment"] = "edited"
         fields = [f for f, _, _ in P.diff(before, after)]
         self.assertIn("proposed_comment", fields)
-        self.assertIn("clone", fields)
+        # None -> {clone} recurses into sub-fields rather than reporting one
+        # opaque "clone" entry — that opacity is what let the routing-rule
+        # clustering in agents/chief_of_staff/rules.py go blind (see its
+        # test_recursion_survives_a_dict_going_to_none below).
+        self.assertIn("clone.target_project", fields)
+        self.assertIn("clone.assignee", fields)
+        self.assertNotIn("clone", fields)
+
+    def test_recursion_survives_a_dict_going_to_none(self):
+        """The other direction: {clone} -> None must also recurse, not collapse
+        to one 'clone' entry — this is the exact shape a NEEDS_CODE ->
+        ANSWERABLE reclassification produces when the clone is dropped."""
+        before, after = base(classification="NEEDS_CODE", clone=clone()), base()
+        fields = {f: (w, b) for f, w, b in P.diff(before, after)}
+        self.assertIn("clone.assignee", fields)
+        self.assertEqual(fields["clone.assignee"], ("dev.one", None))
+        self.assertNotIn("clone", fields)
+
+    def test_diff_skips_a_dict_field_that_did_not_change(self):
+        before = base(clone=clone())
+        after = base(clone=clone())
+        self.assertEqual(P.diff(before, after), [])
 
 
 if __name__ == "__main__":

@@ -54,6 +54,14 @@ TRANSITIONS: dict[str, set[str]] = {
 #: states that mean "this ticket is done unless its content changes".
 TERMINAL = {EXECUTED, REJECTED, DUPLICATE, ESCALATED, ROLLED_BACK}
 
+#: A CLAIMED row with no timeout is a silent trap: a worker thread that dies
+#: mid-flight (crash, OOM, a killed process) leaves the ticket claimed forever,
+#: and should_process() refuses to touch it again — every future sweep skips it
+#: with no error anywhere. 30 minutes is generous against a 5-minute sweep
+#: cadence; a row past it almost certainly means the worker that claimed it is
+#: gone, not still working.
+STALE_CLAIM_MINUTES = 30
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ledger (
   ticket_key      TEXT PRIMARY KEY,
@@ -174,6 +182,39 @@ class Ledger:
     def stats(self) -> dict[str, int]:
         rows = self.conn.execute("SELECT state, COUNT(*) c FROM ledger GROUP BY state")
         return {r["state"]: r["c"] for r in rows}
+
+    # -- stale-claim reclaim -------------------------------------------------
+    def reclaim_stale_claims(self, older_than_minutes: int = STALE_CLAIM_MINUTES
+                              ) -> list[str]:
+        """Move CLAIMED rows past the staleness threshold back to NEW.
+
+        A crashed worker has no other way to release its ticket: should_process()
+        blocks CLAIMED unconditionally, so without this a dead worker's claim is
+        permanent. Call this once per sweep, before should_process() is consulted
+        for anything. Safe to call from multiple processes — each row transitions
+        independently and CLAIMED->NEW is already a legal move.
+        """
+        cutoff = (dt.datetime.now(dt.timezone.utc)
+                  - dt.timedelta(minutes=older_than_minutes)).isoformat(
+                      timespec="seconds")
+        stale = self.conn.execute(
+            "SELECT ticket_key, last_processed FROM ledger "
+            "WHERE state = ? AND last_processed < ?", (CLAIMED, cutoff)
+        ).fetchall()
+        reclaimed = []
+        for row in stale:
+            try:
+                self.transition(row["ticket_key"], NEW,
+                                last_error=f"reclaimed: CLAIMED since "
+                                           f"{row['last_processed']}, worker "
+                                           f"presumed dead")
+                reclaimed.append(row["ticket_key"])
+            except LedgerError:
+                continue  # raced with something else; leave it
+        if reclaimed:
+            LOG.warn("ledger.reclaimed_stale_claims", tickets=reclaimed,
+                     older_than_minutes=older_than_minutes)
+        return reclaimed
 
     # -- the re-processing gate (invariant #4) ------------------------------
     def should_process(self, ticket_key: str, hash_: str, status: str) -> tuple[bool, str]:
@@ -363,6 +404,37 @@ class SlackLedger:
         if row["content_hash"] == hash_:
             return False, f"already handled ({row['state']}), thread unchanged"
         return True, "thread has new messages"
+
+    def reclaim_stale_claims(self, older_than_minutes: int = STALE_CLAIM_MINUTES
+                              ) -> list[str]:
+        """Same trap as the ticket ledger's CLAIMED, same fix.
+
+        Reclaiming to NEW is safe here too: should_process() only unblocks a
+        NEW thread once its content_hash actually changes, so a reclaimed
+        thread with no new messages just sits — visibly, with last_error set
+        — instead of blocking forever with no record of why.
+        """
+        cutoff = (dt.datetime.now(dt.timezone.utc)
+                  - dt.timedelta(minutes=older_than_minutes)).isoformat(
+                      timespec="seconds")
+        stale = self.conn.execute(
+            "SELECT thread_key, last_processed FROM slack_threads "
+            "WHERE state = ? AND last_processed < ?", (CLAIMED, cutoff)
+        ).fetchall()
+        reclaimed = []
+        for row in stale:
+            try:
+                self.transition(row["thread_key"], NEW,
+                                last_error=f"reclaimed: CLAIMED since "
+                                           f"{row['last_processed']}, worker "
+                                           f"presumed dead")
+                reclaimed.append(row["thread_key"])
+            except LedgerError:
+                continue  # raced with something else; leave it
+        if reclaimed:
+            LOG.warn("slack_ledger.reclaimed_stale_claims", threads=reclaimed,
+                     older_than_minutes=older_than_minutes)
+        return reclaimed
 
     def claim(self, channel: str, thread_ts: str, hash_: str) -> bool:
         thread_key = self.key(channel, thread_ts)

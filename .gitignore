@@ -22,3 +22,6 @@ venv/
 
 # os
 .DS_Store
+
+# Local Claude Code worktrees (nested checkouts)
+.claude/worktrees/

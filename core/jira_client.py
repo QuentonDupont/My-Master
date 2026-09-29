@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import pathlib
 import re
 import urllib.error
 import urllib.parse
@@ -97,6 +98,34 @@ class _Base:
         req.add_header("Accept", "application/json")
         if data:
             req.add_header("Content-Type", "application/json")
+        return self._send(req, method, path)
+
+    def _request_multipart(self, method: str, path: str, *, field: str,
+                           filename: str, content: bytes,
+                           content_type: str = "application/octet-stream") -> Any:
+        """A file upload. Jira's attachment endpoint takes multipart/form-data,
+        not the JSON body every other write in this client sends, and demands
+        the anti-CSRF `X-Atlassian-Token` header on top of the usual auth."""
+        if not self.email or not self.token:
+            raise RuntimeError(
+                "JIRA_EMAIL / JIRA_API_TOKEN missing — copy config/.env.example to .env"
+            )
+        boundary = "----jira-client-" + base64.b16encode(filename.encode()).decode()[:16]
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{field}"; filename="{filename}"\r\n'
+            f"Content-Type: {content_type}\r\n\r\n"
+        ).encode("utf-8") + content + f"\r\n--{boundary}--\r\n".encode("utf-8")
+        url = f"{self.base_url}{path}"
+        req = urllib.request.Request(url, data=body, method=method)
+        req.add_header("Authorization", self._auth_header())
+        req.add_header("Accept", "application/json")
+        req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+        req.add_header("X-Atlassian-Token", "no-check")
+        return self._send(req, method, path)
+
+    def _send(self, req: urllib.request.Request, method: str, path: str) -> Any:
+        url = req.full_url
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 raw = resp.read().decode("utf-8") or "{}"
@@ -297,6 +326,29 @@ class JiraWriteClient(_Base):
         return self._do("delete_comment", {"key": key, "comment_id": comment_id},
                         lambda: self._request(
                             "DELETE", f"/rest/api/2/issue/{key}/comment/{comment_id}"))
+
+    # -- attachments ---------------------------------------------------------
+    def add_attachment(self, key: str, file_path: str, *,
+                       content_type: str = "application/octet-stream") -> dict:
+        assert_key_allowed(key)
+        path = pathlib.Path(file_path)
+        content = path.read_bytes()
+
+        def go() -> dict:
+            result = self._request_multipart(
+                "POST", f"/rest/api/2/issue/{key}/attachments",
+                field="file", filename=path.name, content=content,
+                content_type=content_type)
+            # Jira returns a list — one entry per file — even for a single upload.
+            return result[0] if isinstance(result, list) and result else result
+
+        return self._do("add_attachment", {"key": key, "filename": path.name,
+                                           "bytes": len(content)}, go)
+
+    def delete_attachment(self, attachment_id: str) -> dict:  # undo of add_attachment
+        return self._do("delete_attachment", {"attachment_id": attachment_id},
+                        lambda: self._request(
+                            "DELETE", f"/rest/api/2/attachment/{attachment_id}"))
 
     # -- issues ------------------------------------------------------------
     def create_issue(self, project: str, summary: str, description: str,

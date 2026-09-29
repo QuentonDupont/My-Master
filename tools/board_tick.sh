@@ -20,19 +20,52 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
+. "$ROOT/tools/notify_on_failure.sh"
 
 PY=/usr/bin/python3
 stamp() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 
 echo "=== board tick $(stamp) ==="
 
+failed=0
+
 echo "--- 1/3 sweep"
-"$PY" -m agents.jira_leader.queue run 2>&1 | tail -20 || echo "sweep failed"
+if "$PY" -m agents.jira_leader.queue run 2>&1 | tail -20; then
+  clear_alert board_tick_sweep
+else
+  echo "sweep failed"
+  failed=1
+  alert_once board_tick_sweep "My-Master: sweep failing" \
+    "queue run has been failing — check logs/board_tick.err"
+fi
 
 echo "--- 2/3 labels"
-"$PY" -m agents.jira_leader.labels poll --apply 2>&1 | tail -20 || echo "labels failed"
+if "$PY" -m agents.jira_leader.labels poll --apply 2>&1 | tail -20; then
+  clear_alert board_tick_labels
+else
+  echo "labels failed"
+  failed=1
+  alert_once board_tick_labels "My-Master: labels failing" \
+    "labels poll has been failing — check logs/board_tick.err"
+fi
 
 echo "--- 3/3 mirror"
-"$PY" -m core.status_mirror apply --execute 2>&1 | tail -20 || echo "mirror failed"
+if "$PY" -m core.status_mirror apply --execute 2>&1 | tail -20; then
+  clear_alert board_tick_mirror
+else
+  echo "mirror failed"
+  failed=1
+  alert_once board_tick_mirror "My-Master: status mirror failing" \
+    "status_mirror apply has been failing — check logs/board_tick.err"
+fi
+
+if [ "$failed" -eq 0 ]; then
+  heartbeat board_tick
+fi
+
+# Housekeeping: a no-op unless a log has actually crossed the size threshold,
+# so this never delays or blocks the sweep above it. Never allowed to affect
+# $failed — log rotation failing is not a reason to skip the next tick.
+"$ROOT/tools/rotate_logs.sh" 2>&1 || echo "log rotation failed (non-fatal)"
 
 echo "=== done $(stamp) ==="

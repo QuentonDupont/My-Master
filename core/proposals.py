@@ -207,6 +207,15 @@ def validate(data: dict) -> list[str]:  # noqa: C901 - a checklist, kept flat on
     if cls in (ANSWERABLE, NEEDS_CODE) and not comment.strip():
         p.append(f"{cls} requires a proposed_comment")
 
+    # A comment must not cite a ticket outside PESD1/PRDT — the requester can't
+    # see it, and it leaks scope the way MUL/PRTR-751 did (corrections.jsonl,
+    # __rejected__, "the drafted comment cites MUL/PRTR-751 as a similar
+    # ticket"). core/slack_proposals.py already carries this exact check for a
+    # Slack reply; a Jira comment deserves the same one.
+    for key in re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", comment):
+        if key.split("-")[0] not in allowed:
+            p.append(f"proposed_comment names {key}, outside the boards in scope")
+
     if clone:
         target = clone.get("target_project")
         if target != dev:
@@ -304,14 +313,30 @@ def load_all() -> list[Proposal]:
 
 # -- correction diffing ----------------------------------------------------
 def diff(before: dict, after: dict, prefix: str = "") -> list[tuple[str, Any, Any]]:
-    """Flat field-path diff used to write knowledge/corrections.jsonl."""
+    """Flat field-path diff used to write knowledge/corrections.jsonl.
+
+    Recurses whenever EITHER side is a dict, not only when both are — a clone
+    dropping to None (a NEEDS_CODE -> ANSWERABLE reclassification) used to
+    diff as one opaque `clone` entry instead of `clone.assignee`,
+    `clone.summary`, etc. individually. That silently blinded
+    agents/chief_of_staff/rules.py's routing-rule clustering, which keys
+    specifically on `clone.assignee`: real data had 7 `clone` corrections and
+    zero `clone.assignee` ones from this path, all 7 coinciding with a
+    classification change. The classification flip is still (correctly)
+    clustered separately; rules.py guards against a None `was`/`became` pair
+    so this doesn't turn into "Route these to **None**" nonsense.
+    """
     changes: list[tuple[str, Any, Any]] = []
     keys = sorted(set(before) | set(after))
     for key in keys:
         path = f"{prefix}{key}"
         b, a = before.get(key), after.get(key)
-        if isinstance(b, dict) and isinstance(a, dict):
-            changes.extend(diff(b, a, prefix=f"{path}."))
+        b_dict, a_dict = isinstance(b, dict), isinstance(a, dict)
+        if b_dict or a_dict:
+            if b == a:
+                continue
+            changes.extend(diff(b if b_dict else {}, a if a_dict else {},
+                                prefix=f"{path}."))
         elif b != a:
             changes.append((path, b, a))
     return changes

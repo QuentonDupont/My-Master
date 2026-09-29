@@ -69,7 +69,15 @@ def cluster(entries: list[dict] | None = None, min_support: int = MIN_SUPPORT) -
     routing: Counter = Counter()
     routing_context: dict[tuple[str, str], list[str]] = defaultdict(list)
     for e in by_field.get("clone.assignee", []):
-        pair = (str(e.get("was")), str(e.get("became")))
+        was, became = e.get("was"), e.get("became")
+        if not was or not became:
+            # A clone going dict<->None now diffs sub-field by sub-field (see
+            # core/proposals.diff), so a reclassification that drops the clone
+            # shows up here too. That's a classification change, not a
+            # reassignment — it's already clustered under "classification" —
+            # and without this guard it reads as "Route these to **None**".
+            continue
+        pair = (str(was), str(became))
         routing[pair] += 1
         ctx = _ticket_context(e["proposal_id"])
         routing_context[pair].append(
