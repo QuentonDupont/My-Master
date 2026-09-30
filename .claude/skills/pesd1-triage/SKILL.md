@@ -48,6 +48,17 @@ see "Adding to this file" at the bottom.
   human. If it turns out to be never-touch (see above), say so and stop
   there rather than drafting a reply that implies a resolution.
 
+## Posting code or SQL in a Jira comment
+
+`addOrEditJiraIssueComment` defaults to **markdown**, so Jira wiki markup does
+not work: `{code:sql}` is rendered as literal text, the body around it is parsed
+as markdown, and every `*` is silently eaten as emphasis — `COUNT(*)` arrives as
+`COUNT(_)` and `a * b` as `a \* b`. A script pasted that way is invalid and
+looks fine until someone runs it. Use a fenced ```` ```sql ```` block instead,
+then **read the comment back** with `listJiraIssueComments` and spot-check the
+characters markdown would have taken (`*`, `_`, backticks, leading `--`) — the
+write call's own echo is not proof. Hit on PESD1-11301, 2026-09-30.
+
 ## The learning loop is designed to be run, not just written to
 
 `knowledge/corrections.jsonl` accumulates on every edit or rejection, but
