@@ -87,17 +87,17 @@ Do not query, write to, or reason about any other Jira project.
 
 ## Architecture
 
-Four standing agents. Workers are ephemeral — spawned per unit of work, terminated on
+Three standing agents. Workers are ephemeral — spawned per unit of work, terminated on
 completion. Concurrency, not specialisation.
 
 | Agent | Standing | Workers | Owns |
 |---|---|---|---|
 | Jira Leader | 1 | 5 concurrent, one per ticket | Queue, ledger, batch assembly, execution |
 | Historian | 1 | — (index + query layer) | Retrieval, SOP drafting |
-| Slack Leader | 1 | 3 concurrent, one per thread | Mentions, status replies, requester updates |
 | Chief of Staff | 1 | — | Morning brief, rule proposals, cost, error review |
 
-Build order is Historian → Jira Leader → Chief of Staff → Slack Leader.
+Build order is Historian → Jira Leader → Chief of Staff.
+Slack is out of scope for this repo; it is handled elsewhere.
 Do not start a later component before the earlier one meets its acceptance criteria.
 
 ---
@@ -111,7 +111,6 @@ Do not start a later component before the earlier one meets its acceptance crite
   /historian     retrieval + SOP drafting
   /jira_leader   queue, workers, batch assembly
   /chief_of_staff
-  /slack_leader  (phase 5 — do not create earlier)
 /core
   ledger.py      SQLite state machine, the ONLY place ledger state changes
   proposals.py   proposal schema, validation, serialisation

@@ -1,7 +1,7 @@
 """The work item this team passes around, and where it is stored.
 
 A content task is whatever Quenton hands over — a file of copy, a folder of
-images, or a line of Slack asking for a banner pulled from HK. It arrives with
+images, or a one-line request for a banner pulled from HK. It arrives with
 almost no structure, so `ContentTask` keeps it deliberately loose and records
 what is missing rather than inventing it. `blocking_gaps()` is what stops a
 worker drafting a change out of assumptions.

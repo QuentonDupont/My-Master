@@ -17,8 +17,8 @@ from core import config, ledger as ledger_mod, log
 LOG = log.get("chief_of_staff")
 
 #: How stale a "heartbeat" logger can be before a team reads as not-running.
-#: jira_leader and slack_poller are meant to tick every few minutes; a gap
-#: past this means the launchd job died silently, not that it is just quiet.
+#: jira_leader is meant to tick every few minutes; a gap past this means the
+#: launchd job died silently, not that it is just quiet.
 STALE_AFTER = dt.timedelta(hours=2)
 
 LAUNCHD_JOBS = ("com.pomelo.mcp", "com.pomelo.daily_report")
@@ -91,16 +91,6 @@ def jira_leader() -> dict:
     return {"heartbeat": heartbeat, "ledger": stats, "stuck_tickets": len(stuck)}
 
 
-def slack_leader() -> dict:
-    heartbeat = _heartbeat("slack_poller")
-    try:
-        with ledger_mod.Ledger() as led:
-            stats = ledger_mod.SlackLedger(led).stats()
-    except Exception as exc:  # pragma: no cover - db path
-        return {"heartbeat": heartbeat, "error": str(exc)[:200]}
-    return {"heartbeat": heartbeat, "ledger": stats}
-
-
 def historian() -> dict:
     if not config.CORPUS_DB.exists():
         return {"error": "corpus.db does not exist — run corpus.export / .index"}
@@ -146,7 +136,6 @@ def check_all() -> dict:
         "generated": _now().isoformat(timespec="minutes") + "Z",
         "launchd": launchd(),
         "jira_leader": jira_leader(),
-        "slack_leader": slack_leader(),
         "historian": historian(),
         "chief_of_staff": chief_of_staff(),
         "marketing_onsite": marketing_onsite(),

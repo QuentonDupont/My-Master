@@ -52,8 +52,8 @@ NEGATED_ACTION = re.compile(
 QUESTION_WORDS = ("how", "where", "what", "which", "who", "when", "why")
 
 #: A yes/no question opens with an auxiliary or a modal instead of a wh-word.
-#: Jira prose asks with "how do I…"; Slack asks "is it possible…?", "are you
-#: joining?", "you guys tested this on preprod?". Those are requests too, and
+#: Jira prose asks with "how do I…"; chat-style requests ask "is it possible…?",
+#: "are you joining?", "you guys tested this on preprod?". Those are requests too, and
 #: the wh-word list alone escalated every one of them.
 YESNO_OPENERS = ("is", "are", "was", "were", "am", "do", "does", "did",
                  "can", "could", "shall", "should", "will", "would",

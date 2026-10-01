@@ -69,7 +69,7 @@ def tearDownModule():
 
 
 class YesNoQuestionTests(unittest.TestCase):
-    """Slack asks yes/no questions; the wh-word list alone escalated them all."""
+    """Chat-style requests ask yes/no questions; the wh-word list alone escalated them all."""
 
     def ask(self, text):
         from agents.jira_leader.gates import asks_something

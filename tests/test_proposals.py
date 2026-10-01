@@ -121,8 +121,7 @@ class ProposalValidationTests(unittest.TestCase):
 
     def test_comment_may_not_cite_a_ticket_outside_scope(self):
         """The exact failure a rejection in corrections.jsonl was for: the
-        drafted comment cited MUL/PRTR-751 as a similar ticket. core/
-        slack_proposals.py already carried this check for a Slack reply."""
+        drafted comment cited MUL/PRTR-751 as a similar ticket."""
         problems = P.validate(base(
             proposed_comment="This is the same as PRTR-751, see there."))
         self.assertTrue(any("PRTR-751" in p and "outside" in p for p in problems))

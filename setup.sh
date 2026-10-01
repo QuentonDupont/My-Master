@@ -9,7 +9,7 @@
 #   ./setup.sh --remove-schedules   remove what --schedules installed
 #   ./setup.sh --help
 #
-# What it does NOT do: it never writes to Jira, Slack, Confluence or email. It
+# What it does NOT do: it never writes to Jira, Confluence or email. It
 # never prints a secret. It never overwrites an existing .env, ledger, or corpus.
 # Everything the system writes outward still needs an explicit --execute later.
 #
@@ -99,7 +99,7 @@ have() { grep -E "^$1=.+" .env | grep -qvE "=you@pomelofashion\.com$"; }
 for k in JIRA_EMAIL JIRA_API_TOKEN; do
   have "$k" && ok "$k set" || warn "$k empty (required for anything live)"
 done
-for k in SLACK_USER_TOKEN SLACK_BOT_TOKEN ANTHROPIC_API_KEY GITHUB_TOKEN \
+for k in ANTHROPIC_API_KEY GITHUB_TOKEN \
          GMAIL_OAUTH_REFRESH_TOKEN REPORT_EMAIL_APP_PASSWORD REPORT_EMAIL_FROM; do
   have "$k" && ok "$k set" || printf '  --    %s empty (optional)\n' "$k"
 done
@@ -136,9 +136,6 @@ elif have JIRA_API_TOKEN && have JIRA_EMAIL; then
   if "$PY" -m core.preflight >"$PF" 2>&1; then ok "preflight: every live assumption PASS (boards, statuses, fields, permissions)"
   else warn "preflight reported FAIL/WARN. See below"; tail -25 "$PF"; fi
   rm -f "$PF"
-  if have SLACK_USER_TOKEN || have SLACK_BOT_TOKEN; then
-    "$PY" -m core.slack_client whoami >/dev/null 2>&1 && ok "Slack: authenticated" || warn "Slack: whoami failed (xapp- tokens cannot read or post; use xoxp- or xoxb-)"
-  fi
 else
   echo "  --    no Jira credentials yet: skipped. Fill JIRA_EMAIL and JIRA_API_TOKEN in .env, then re-run"
 fi
@@ -160,15 +157,14 @@ fi
 # ---------------------------------------------------------------- 7. schedules
 step "7/7 Scheduled jobs"
 OS="$(uname -s)"
-ALL="board corpus report poller mcp"
+ALL="board corpus report mcp"
 [ "$SCHEDULES" = "all" ] && SCHEDULES="${ALL// /,}"
-label_for() { case "$1" in board) echo com.pomelo.board-tick;; corpus) echo com.pomelo.corpus-refresh;; report) echo com.pomelo.daily_report;; poller) echo com.pomelo.slack-poller;; mcp) echo com.pomelo.mcp;; esac; }
+label_for() { case "$1" in board) echo com.pomelo.board-tick;; corpus) echo com.pomelo.corpus-refresh;; report) echo com.pomelo.daily_report;; mcp) echo com.pomelo.mcp;; esac; }
 
 needs_ok() {  # the same guards the install_*.sh scripts apply
   case "$1" in
     board|corpus) have JIRA_API_TOKEN || { warn "$1: JIRA_API_TOKEN missing, not installing"; return 1; } ;;
     report) { have GMAIL_OAUTH_REFRESH_TOKEN || have REPORT_EMAIL_APP_PASSWORD; } && have REPORT_EMAIL_FROM || { warn "report: email credentials missing, not installing"; return 1; } ;;
-    poller) { have SLACK_USER_TOKEN || have SLACK_BOT_TOKEN; } || { warn "poller: no Slack read token, not installing"; return 1; } ;;
     mcp) have MCP_AUTH_TOKEN || { warn "mcp: MCP_AUTH_TOKEN missing"; return 1; } ;;
   esac
 }
@@ -189,7 +185,7 @@ elif [ -z "$SCHEDULES" ]; then
   echo "        IMPORTANT: run the scheduled jobs on ONE machine only. See SETUP.md, 'One writer'."
 elif [ "$YES" -ne 1 ]; then
   warn "scheduling changes the machine, so add --yes to confirm:  ./setup.sh --schedules $SCHEDULES --yes"
-  echo "        Reminder: only ONE machine may run board/corpus/poller at a time."
+  echo "        Reminder: only ONE machine may run board/corpus at a time."
 else
   PYABS="$(command -v "$PY")"
   if [ "$OS" = "Darwin" ]; then
@@ -214,7 +210,6 @@ else
         board)  LINES+="*/5 * * * * cd '$ROOT' && PY='$PYABS' ./tools/board_tick.sh >> logs/board_tick.out 2>> logs/board_tick.err"$'\n' ;;
         corpus) LINES+="0 */2 * * * cd '$ROOT' && PY='$PYABS' ./tools/corpus_refresh.sh >> logs/corpus_refresh.out 2>> logs/corpus_refresh.err"$'\n' ;;
         report) LINES+="0 9 * * * cd '$ROOT' && '$PYABS' -m agents.chief_of_staff.daily_report run --send >> logs/daily_report.out 2>> logs/daily_report.err"$'\n' ;;
-        poller) LINES+="*/3 * * * * cd '$ROOT' && '$PYABS' -m agents.slack_leader.poller once >> logs/poller.out 2>> logs/poller.err"$'\n' ;;
         mcp)    warn "mcp is a long-running server, not a cron job. Run it under systemd/supervisor: see SETUP.md" ;;
         *) bad "unknown job '$j'" ;;
       esac

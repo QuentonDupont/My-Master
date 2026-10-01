@@ -210,8 +210,7 @@ def validate(data: dict) -> list[str]:  # noqa: C901 - a checklist, kept flat on
     # A comment must not cite a ticket outside PESD1/PRDT — the requester can't
     # see it, and it leaks scope the way MUL/PRTR-751 did (corrections.jsonl,
     # __rejected__, "the drafted comment cites MUL/PRTR-751 as a similar
-    # ticket"). core/slack_proposals.py already carries this exact check for a
-    # Slack reply; a Jira comment deserves the same one.
+    # ticket").
     for key in re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", comment):
         if key.split("-")[0] not in allowed:
             p.append(f"proposed_comment names {key}, outside the boards in scope")

@@ -17,14 +17,14 @@ the system **is**, what it **connects to**, how it **must behave**, and how to
 git clone <your remote> My-Master && cd My-Master
 git checkout <the branch you are deploying>     # see §10 for which one
 
-./setup.sh                  # checks Python + SQLite FTS5, creates .env, runs the 289 tests
+./setup.sh                  # checks Python + SQLite FTS5, creates .env, runs the 227 tests
 $EDITOR .env                # JIRA_EMAIL + JIRA_API_TOKEN at minimum
 ./setup.sh                  # re-run: now also checks Jira + runs the read-only preflight
 ./setup.sh --build-corpus   # first time only: 18 months of PESD1/PRDT + Confluence → search index
 make brief                  # what is waiting for you
 ```
 
-That gets you a working, **read-only** system. It still cannot write to Jira, Slack
+That gets you a working, **read-only** system. It still cannot write to Jira
 or email until you pass `--execute` to a specific command (§4). To make it run on its
 own: `./setup.sh --schedules all --yes` (§8), on **one machine only** (§9).
 
@@ -59,18 +59,17 @@ approval batch (review/) ── human: approve / edit / reject ──► correct
 core/execute.py  (the ONLY Jira write path)                        ▼
  comment → clone to PRDT → link → assign → transition       Chief of Staff clusters
                                                              corrections into rule
-Slack Leader: @mentions → reply proposals (human posts)      proposals; a human adds
+(Slack is handled outside this repo)                         proposals; a human adds
 Marketing & Onsite: Apollo content drafts, staged inactive   them to knowledge/rules.md
 ```
 
-Four standing agents plus one team (workers are ephemeral, one per unit of work):
+Three standing agents plus one team (workers are ephemeral, one per unit of work):
 
 | Agent | Job | Entry points |
 |---|---|---|
 | **Historian** | Search index over past tickets, Confluence, GitHub; duplicate detection; assignee ranking; SOP drafting | `agents/historian`, `corpus/` |
 | **Jira Leader** | Poll the board, run workers, assemble approval batches, hand approved work to execution | `agents/jira_leader` |
 | **Chief of Staff** | Morning brief, 09:00 emailed daily report, health checks, board ranking, rule proposals, cost and error review | `agents/chief_of_staff` |
-| **Slack Leader** | Turn Slack @mentions into reply proposals; poll channels | `agents/slack_leader` |
 | **Marketing & Onsite** | Draft Apollo content changes (banners, menus, navigation); reports to the board owner directly | `agents/marketing_onsite` |
 
 ---
@@ -84,7 +83,6 @@ connects *in* except the optional MCP connector.
 |---|---|---|---|---|
 | **Jira Cloud** (`pomelofashion.atlassian.net`) | REST v2 + Agile, `core/jira_client.py` | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` | Read everywhere; write **only** via `core/execute.py` and status mirroring. Hard allowlist: PESD1 and PRDT only | **Required** for anything live |
 | **Confluence** (same site, `/wiki/api/v2`) | `core/confluence_client.py`, same login | same Jira token | **Read only**, no write path exists | Historian's best evidence (SOPs weigh more than ticket history). Spaces in `config/confluence.yml` |
-| **Slack** | Web API, `core/slack_client.py` | `SLACK_USER_TOKEN` (xoxp-, preferred, reads as you) or `SLACK_BOT_TOKEN` (xoxb-). **xapp- tokens cannot read or post** | Read always; post only via `core.slack_execute --execute` after approval | Slack Leader + poller. Optional |
 | **GitHub** (`api.github.com`, org `pomelofashion`) | commit/PR search by ticket key | `GITHUB_TOKEN` | Read only | Links a ticket to the change that fixed it. Optional |
 | **Anthropic API** | `agents/jira_leader/analysis.py` | `ANTHROPIC_API_KEY`, `ANALYST_MODEL` | Outbound prompts | Optional. **Unset = workers use a deterministic keyword heuristic.** The biggest single quality lever |
 | **Gmail SMTP** | `core/mailer.py`; OAuth2 via `oauth2.googleapis.com` (`tools/gmail_oauth_setup.py`) or app password | `GMAIL_OAUTH_*` or `REPORT_EMAIL_APP_PASSWORD`, `REPORT_EMAIL_FROM/TO` | Sends the daily report only | 09:00 daily status email. Optional |
@@ -92,7 +90,7 @@ connects *in* except the optional MCP connector.
 | **Claude app (phone)** | MCP server, `tools/mcp_server.py`, JSON-RPC over HTTP | `MCP_AUTH_TOKEN` (server refuses to start without it) | Inbound. Needs a **public URL** (Anthropic calls it from their servers): Tailscale Funnel or a Cloudflare tunnel | Approving from the phone. Optional |
 | **claude.ai review page** | `tools/review_app.html` published as a private Artifact | none in the repo | Records approve/reject, has no Jira credentials | Optional phone review UI. **Lives on claude.ai, not in git** |
 
-**Deliberately not connected:** Apollo and Henry. There is **no client for either** in
+**Deliberately not connected:** Apollo and Henry, and **Slack** (removed 1 Oct 2026; it is handled elsewhere). There is **no client for any of them** in
 this repo. Marketing & Onsite only *drafts* plans for Apollo surfaces; a human applies
 them. NetSuite, Superset and customer data are not touched. MCP tools: `board_status`,
 `list_proposals`, `show_proposal`, `approve`, `reject`, `execute` (dry-run unless
@@ -137,9 +135,7 @@ dated approval written into `CLAUDE.md`.
 8. **No credentials in the repo or in logs.** Secrets come from `.env` via
    `core.config.env()`, which feeds a redactor.
 9. **Every write has its undo** written in the same commit (`core.execute undo`).
-10. **Never post to Slack without approval.** A message can be deleted but not unread.
-    Never-touch subjects get total silence: no reply, no acknowledgement.
-11. **Scope:** only the PESD1 and PRDT projects. Any other key or JQL raises `ScopeError`.
+10. **Scope:** only the PESD1 and PRDT projects. Any other key or JQL raises `ScopeError`.
 
 **Standing instructions from the board owner** (from `HANDOFF.md`): keep
 developer-facing text direct, so a developer never has to read the whole ticket to
@@ -167,8 +163,6 @@ item only.
 **Lessons that have already cost time** (`.claude/skills/pesd1-triage`): Jira comments
 through the MCP tool are *markdown*, so `{code}` markup renders as text and markdown
 eats `*` (`COUNT(*)` posts as `COUNT(_)`); use a fenced block and read the comment back.
-`slack_send_message_draft` drafts, `slack_send_message` sends. A ticket key mentioned
-in Slack identifies the requester, so pull that ticket's own comments before replying.
 
 ---
 
@@ -187,20 +181,22 @@ in Slack identifies the requester, so pull that ticket's own comments before rep
   Confluence is refreshed manually. Ledger and corpus are **local SQLite**; there is
   no server database.
 * **If you work in Claude Code here:** `CLAUDE.md` and `.claude/skills/` load
-  automatically. Skills: `pesd1-triage` (board sweeps, Slack mentions, requester
-  replies) and `apollo-category-nav` (Apollo Category Navigation lessons: the DB
+  automatically. Skills: `pesd1-triage` (board sweeps, requester replies) and `apollo-category-nav` (Apollo Category Navigation lessons: the DB
   `bar_type` names lie, saves publish live, verify in the database). Read `CLAUDE.md`
   and `HANDOFF.md` first, and **ask before widening any invariant**.
 * **No GUI.** The local review panel (`tools/panel.py`) was removed on 29 Sep 2026 at
   the board owner's request. Review happens in `review/batch_*.md|json`, via the MCP
   connector, or on the claude.ai page. Don't rebuild a panel.
+* **No Slack.** The Slack Leader, its poller and its client were removed on 1 Oct 2026 at
+  the board owner's request: Slack is handled elsewhere. Don't re-add it here. Existing
+  ledgers keep an unused `slack_threads` table; it is harmless and can be ignored.
 
 ---
 
 ## 6. Command cheat sheet
 
 ```bash
-make test                 # 289 tests, offline
+make test                 # 227 tests, offline
 make brief                # morning brief: waiting, escalations, cost, errors
 make queue                # triage Waiting Support            (writes proposals only)
 make batch                # assemble the approval batch       → review/batch_*.md|json
@@ -220,9 +216,7 @@ python3 -m core.jira_client whoami|fields --grep email|transitions PESD1-123
 python3 -m core.ledger stats
 python3 -m core.recommendations list    # tickets for YOU to close; the system never closes
 
-# Slack and Marketing & Onsite
-python3 -m agents.slack_leader.poller once|state|reset
-python3 -m core.slack_execute run s_0003 [--execute]
+# Marketing & Onsite, and the daily report
 python3 -m agents.marketing_onsite.lead add "pull the banner off HK" --surface web_hero --markets TH
 python3 -m agents.marketing_onsite.lead run | report
 python3 -m agents.chief_of_staff.daily_report run [--send]
@@ -255,7 +249,6 @@ missing). Nothing here posts, comments, clones or emails except the daily report
 |---|---|---|---|---|
 | `board` (`tools/board_tick.sh`) | 5 min | sweep → record `triage-approved/rejected` labels → mirror PESD1 status | **Only** the sanctioned status mirror | Jira |
 | `corpus` (`tools/corpus_refresh.sh`) | 2 h | merge recently updated tickets, rebuild index | No | Jira |
-| `poller` (`agents.slack_leader.poller once`) | 3 min | find @mentions → proposals | No | Slack token |
 | `report` (`agents.chief_of_staff.daily_report run --send`) | 09:00 local | status email | **Emails the board owner** | Gmail creds |
 | `mcp` (`tools.mcp_server`, always on) | n/a | phone connector | Only via approved `execute` | `MCP_AUTH_TOKEN` + public URL |
 
@@ -278,8 +271,8 @@ restart). Either way `MCP_AUTH_TOKEN` is what makes a public URL safe.
 ## 9. Moving it (read this before you switch machines)
 
 ### One writer
-**Run the scheduled jobs on exactly one machine.** The ledger and the Slack cursor are
-local files. A second machine with an empty ledger sees every "Waiting Support"
+**Run the scheduled jobs on exactly one machine.** The ledger is a local
+file. A second machine with an empty ledger sees every "Waiting Support"
 ticket as *new*, re-proposes them, and its status mirror may move tickets the first
 machine already handled. Stop the old jobs first (`./setup.sh --remove-schedules` on
 the old machine), *then* start the new ones.
@@ -293,7 +286,7 @@ so you must carry it or rebuild it:**
 |---|---|---|
 | Secrets | `.env` | **Re-issue the tokens** on the new host if you can; otherwise copy over a secure channel. Never email it |
 | **Ledger** (what was proposed/executed, parent↔clone pairs) | `corpus/ledger.db` (+ `-wal`, `-shm`) | **Yes, essential.** Copy a consistent snapshot: `sqlite3 corpus/ledger.db ".backup 'ledger-copy.db'"` and use that file |
-| Pending proposals, batches, decisions, recommendations, Slack cursor | `review/` (`proposals/`, `decisions.json`, `recommendations.jsonl`, `slack_poll_cursor.json`, `content_tasks/`, `content_plans/`) | Yes |
+| Pending proposals, batches, decisions, recommendations | `review/` (`proposals/`, `decisions.json`, `recommendations.jsonl`, `content_tasks/`, `content_plans/`) | Yes |
 | Execution history and timing | `logs/*.jsonl` (`execute.jsonl`, `corrections.jsonl`, …) | Yes if you want the brief's history |
 | Search index | `corpus/corpus.db`, `corpus/raw/` | **No, rebuildable**: `./setup.sh --build-corpus` (about 25 MB, takes a while) |
 | Intake sheet CSV | `corpus/raw/intake_sheet.csv` (`REQUESTER_SHEET_CSV`) | Re-export from the sheet |
@@ -306,7 +299,7 @@ so you must carry it or rebuild it:**
 5. `python3 -m core.ledger stats` should match the old machine's counts.
 6. `make brief`, then one manual `make queue` and `make batch`. Confirm nothing already-handled reappears.
 7. `./setup.sh --schedules all --yes`.
-8. Slack/phone: re-point the MCP connector at the new URL; `python3 -m agents.slack_leader.poller state` to confirm the cursor moved over.
+8. Phone: re-point the MCP connector at the new URL.
 
 ### Not portable by themselves
 * The live launchd jobs on the old Mac point at `/Users/quenton-d/My-Master`; the repo's
@@ -322,18 +315,17 @@ From `HANDOFF.md` (18 Sep) plus this week's changes. Verify before relying on th
 
 * **Live in Jira (18 Sep):** five PESD1 tickets triaged → PRDT-11559/60/64/65/66, epics
   PRDT-10732 and PRDT-11563. PESD1-10660 and 11276 were deliberately left alone.
-* **Waiting on the board owner:** a Slack token for the poller (`xoxp-`/`xoxb-`; the
-  `xapp-` ones cannot read); **PRDT-11559 → "Close as Won't Do"** (duplicate of 11539/11536);
+* **Waiting on the board owner:** **PRDT-11559 → "Close as Won't Do"** (duplicate of 11539/11536);
   BUSK board 377 was refused as out of scope (a readable-vs-writable split needs a "yes"
   and a `CLAUDE.md` change); more Confluence spaces (DO, PRA, POMQ…); and
   **`ANTHROPIC_API_KEY`** (unset, so workers run the heuristic).
 * **Branches:** `wip/daily-report-health-mailer` carries the daily report, health checks,
   Gmail mailer and ops scripts (work in progress); `worktree-remove-panel` is that plus the
-  panel removal, the portability fixes, `setup.sh` and this file. Deploy whichever the
-  board owner names. `main` has the MCP server, Slack poller, status mirror and Marketing &
-  Onsite, but **not** the daily report, mailer or health checks, and it still contains the
+  panel removal, the Slack removal, the portability fixes, `setup.sh` and this file. Deploy whichever the
+  board owner names. `main` has the MCP server, status mirror and Marketing &
+  Onsite (and still Slack), but **not** the daily report, mailer or health checks, and it still contains the
   removed panel.
-* **Known stale text:** `README.md` says "75 tests" (it is 289) and lists a layout that
+* **Known stale text:** `README.md` says "75 tests" (it is 227) and lists a layout that
   predates the daily report and Marketing & Onsite.
 
 ---
@@ -341,7 +333,7 @@ From `HANDOFF.md` (18 Sep) plus this week's changes. Verify before relying on th
 ## 11. Verify a fresh install
 
 ```bash
-./setup.sh                              # 0 failures; 289 tests OK
+./setup.sh                              # 0 failures; 227 tests OK
 python3 -m core.jira_client whoami      # your account
 python3 -m core.preflight               # all PASS (WARN is a note, FAIL is a stop)
 python3 -m core.ledger stats            # matches the old machine after a migration
