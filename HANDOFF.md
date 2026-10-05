@@ -122,6 +122,17 @@ keyword heuristics today.
 - Never delete a ticket — recommend "Close as Won't Do" instead (invariant 9).
 - Every outbound message, Jira or Slack, is approved by a human first.
 
+## Release standards for code changes — 5 Oct
+
+The board owner asked for high standards on every code release. For `[APOLLO]`
+TECH tickets, follow `knowledge/playbooks/apollo-validation-and-prerelease.md`:
+review the AI's PR, prove it locally (PHPUnit before/after plus a headed
+Playwright harness), check the SQL read-only on real data, fix findings
+test-first, hand over with honest evidence and checklist, optionally pre-release
+`vX.Y.Z.N` to the shared pre-prod, then verify on pre-prod. First done end to end
+on TECH-16 / apollo#4886 (merged by Suresh, pre-prod `v2.849.0.2`).
+No credentials in the playbook or anywhere in this repo (invariant 7).
+
 ## The review page
 
 https://claude.ai/artifact/UBNzgPpL7W16vZVh4a8m2k — proposals, Slack replies,
