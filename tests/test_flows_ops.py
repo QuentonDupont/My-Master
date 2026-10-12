@@ -14,25 +14,39 @@ from tests.helpers import fixture_boards, sandbox
 
 
 class DailyReportTests(unittest.TestCase):
-    def test_manual_run_renders_and_does_not_send(self):
+    def test_report_is_saved_to_a_file_and_email_skipped_without_gmail(self):
         with sandbox(), fixture_boards(), \
-                patch("agents.chief_of_staff.health.launchd", return_value={}):
-            res = DAILY_REPORT.run(Context("daily-report"))
+                patch("agents.chief_of_staff.health.launchd", return_value={}), \
+                patch("core.mailer.configured", return_value=False), \
+                patch("core.mailer.send") as send:
+            res = scheduler.run_flow(DAILY_REPORT, trigger="schedule")
             self.assertTrue(res.ok, res.error)
-            self.assertIn("HEALTH", res.data["report"])
-            self.assertTrue(res.data["sent"]["dry_run"])
+            files = list((config.REVIEW_DIR / "daily_reports").glob("*.md"))
+            self.assertEqual(len(files), 1)
+            self.assertIn("HEALTH", files[0].read_text())
+            self.assertIn("skipped", res.data["sent"])
+            send.assert_not_called()
 
-    def test_scheduled_run_sends_and_a_mail_failure_fails_the_flow(self):
+    def test_with_gmail_configured_it_also_sends(self):
+        with sandbox(), fixture_boards(), \
+                patch("agents.chief_of_staff.health.launchd", return_value={}), \
+                patch("core.mailer.configured", return_value=True), \
+                patch("core.mailer.send", return_value={"dry_run": False}) as send:
+            res = scheduler.run_flow(DAILY_REPORT, trigger="schedule")
+            self.assertTrue(res.ok, res.error)
+            self.assertFalse(send.call_args.kwargs["dry_run"])
+
+    def test_a_mail_failure_when_configured_fails_the_flow_after_saving(self):
         from core.mailer import MailerNotConfigured
 
         with sandbox(), fixture_boards(), \
                 patch("agents.chief_of_staff.health.launchd", return_value={}), \
-                patch("core.mailer.send", side_effect=MailerNotConfigured("no auth")) as send:
+                patch("core.mailer.configured", return_value=True), \
+                patch("core.mailer.send", side_effect=MailerNotConfigured("revoked")):
             res = scheduler.run_flow(DAILY_REPORT, trigger="schedule")
             self.assertFalse(res.ok)
             self.assertIn("send_report", res.error)
-            self.assertFalse(send.call_args.kwargs["dry_run"])
-            self.assertIn("HEALTH", res.data["report"])     # the report itself was built
+            self.assertTrue(list((config.REVIEW_DIR / "daily_reports").glob("*.md")))
 
     def test_report_shows_flow_health(self):
         from agents.chief_of_staff import health

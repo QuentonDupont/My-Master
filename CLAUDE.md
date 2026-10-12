@@ -139,7 +139,7 @@ mirror, daily-report); manual runs are dry-run unless `--execute`.
 | confluence | Mon 07:00 | export_confluence → build_index |
 | content | on `content_task.added`, hourly | claim_new_tasks → draft_plan ×3 → summarise_content |
 | escalation | human (an answer) | check_escalation → rewrite_proposal → record_correction → requeue_ticket |
-| daily-report | 09:00 | check_health → build_brief → assemble_report → render_report → send_report |
+| daily-report | 09:00 | check_health → build_brief → assemble_report → render_report → save_report → send_report (only if Gmail is configured) |
 | rules | Mon 08:30 | cluster_corrections → write_rule_proposals |
 | housekeeping | hourly | rotate_logs → prune_run_history |
 

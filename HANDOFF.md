@@ -7,9 +7,10 @@ with a trigger (CLAUDE.md > Architecture). On the branch, not yet live:
   `daily_report`). To switch: merge, then `./tools/install_flows.sh` (retires
   them, installs `com.pomelo.flows`). `./tools/install_flows.sh rollback`
   restores them; their scripts still work against the refactored code.
-* The 09:00 report **failed on 12 Oct** — `MailerNotConfigured`, no Gmail auth.
-  Run `python3 tools/gmail_oauth_setup.py` once. Under flows this failure
-  fails the daily-report flow and raises one alert, instead of only an exit 1.
+* **LIVE since 12 Oct 2026** — `com.pomelo.flows` installed, old jobs retired.
+* **Daily report goes to a file, not email** (board owner's choice, 12 Oct):
+  `review/daily_reports/<date>.md`. `send_report` skips while no Gmail
+  credentials are set; `tools/gmail_oauth_setup.py` turns emailing back on.
 * New behaviour: `rules` now actually runs weekly (Mon 08:30, proposals only);
   `confluence` refreshes weekly (Mon 07:00, read-only); research runs every
   15m instead of every 5m; mirror moves are journalled in `execution_log`.
