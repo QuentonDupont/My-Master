@@ -31,7 +31,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 . "$ROOT/tools/notify_on_failure.sh"
 
-PY=/usr/bin/python3
+PY="${PY:-/usr/bin/python3}"; [ -x "$PY" ] || PY="$(command -v python3)"
 stamp() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 
 # Generous overlap against the refresh interval (2h by default, see the

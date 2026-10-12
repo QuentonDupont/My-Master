@@ -1,6 +1,6 @@
 ---
 name: pesd1-triage
-description: Use when working the PESD1/PRDT Jira triage farm in this repo — sweeping the board, checking a Slack @channel mention, drafting a requester reply, or deciding whether something can be resolved without a developer. Read CLAUDE.md and HANDOFF.md first; this skill is the accumulated operating lessons on top of them, not a replacement.
+description: Use when working the PESD1/PRDT Jira triage farm in this repo — sweeping the board, drafting a requester reply, or deciding whether something can be resolved without a developer. Read CLAUDE.md and HANDOFF.md first; this skill is the accumulated operating lessons on top of them, not a replacement.
 ---
 
 # PESD1 triage — operating lessons
@@ -31,22 +31,16 @@ see "Adding to this file" at the bottom.
    loop. Say this plainly before doing it, and only do it once the human has
    actually said to.
 
-## Slack
+## Posting code or SQL in a Jira comment
 
-- **`slack_send_message_draft` creates a draft. `slack_send_message` sends.**
-  Confirm which one is being called before calling it — the failure mode
-  (posting live instead of drafting) is publicly visible and cannot be
-  un-sent; there is no edit/delete on the connector.
-- **A ticket key mentioned in a Slack message identifies the requester.**
-  When a message names `PESD1-\d+` or `PRDT-\d+`, pull that issue's own
-  comments (and its linked clone's comments) before drafting a reply. Often
-  the work and the answer already exist in Jira and just never made it back
-  to the thread that's asking about it — the gap is feedback, not effort.
-- **`@channel` messages with no ticket key are unlogged asks.** Investigate
-  whether it's something the system can actually resolve (root-cause it in
-  the code, same as any PESD1 ticket would get) before assuming it needs a
-  human. If it turns out to be never-touch (see above), say so and stop
-  there rather than drafting a reply that implies a resolution.
+`addOrEditJiraIssueComment` defaults to **markdown**, so Jira wiki markup does
+not work: `{code:sql}` is rendered as literal text, the body around it is parsed
+as markdown, and every `*` is silently eaten as emphasis — `COUNT(*)` arrives as
+`COUNT(_)` and `a * b` as `a \* b`. A script pasted that way is invalid and
+looks fine until someone runs it. Use a fenced ```` ```sql ```` block instead,
+then **read the comment back** with `listJiraIssueComments` and spot-check the
+characters markdown would have taken (`*`, `_`, backticks, leading `--`) — the
+write call's own echo is not proof. Hit on PESD1-11301, 2026-09-30.
 
 ## The learning loop is designed to be run, not just written to
 

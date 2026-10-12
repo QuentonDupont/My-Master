@@ -22,8 +22,7 @@ from agents.chief_of_staff import health as health_mod
 
 LOG = log.get("chief_of_staff")
 
-TEAMS = ("Jira Leader", "Historian", "Slack Leader", "Chief of Staff",
-         "Marketing & Onsite")
+TEAMS = ("Jira Leader", "Historian", "Chief of Staff", "Marketing & Onsite")
 
 
 def _yesterday_window() -> tuple[dt.datetime, dt.datetime]:
@@ -82,7 +81,6 @@ def gather() -> dict:
                 for r in executed_24h],
             "boards": b.get("boards", {}),
         },
-        "slack_leader": h["slack_leader"],
         "historian": h["historian"],
         "chief_of_staff": {
             "corrections_logged": b["corrections_logged"],
@@ -116,16 +114,6 @@ def render(data: dict) -> str:
         "Jira Leader", jira_ok,
         f"{hj['waiting_for_decision']} waiting, {hj['approved_not_executed']} "
         f"approved not executed, {hj['escalations']} escalations"))
-
-    sl = data["slack_leader"]
-    hb = sl.get("heartbeat", {})
-    sl_ok = not hb.get("stale") and not sl.get("error")
-    out.append(_team_line(
-        "Slack Leader", sl_ok,
-        (f"last poll {hb.get('age_minutes', '?')}m ago" if hb.get("last_seen")
-         else "poller has never run")
-        + (f"; ledger: {sl['ledger']}" if sl.get("ledger") else "")
-        + (f"; ERROR: {sl['error']}" if sl.get("error") else "")))
 
     hist = data["historian"]
     hist_ok = not hist.get("error") and not hist.get("stale")

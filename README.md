@@ -15,16 +15,16 @@ documentation of it.
 
 ## Build status
 
-Build order is Historian → Jira Leader → Chief of Staff → Slack Leader.
+Build order is Historian → Jira Leader → Chief of Staff.
 
 | Component | State |
 |---|---|
 | Historian (`agents/historian`, `corpus/`) | built — retrieval, duplicates, assignee ranking, SOP drafting |
 | Jira Leader (`agents/jira_leader`) | built — queue, 5 concurrent workers, batch assembly, execution hand-off |
 | Chief of Staff (`agents/chief_of_staff`) | built — morning brief, rule proposals, cost, error review |
-| Slack Leader (`agents/slack_leader`) | built — mentions: 3 concurrent thread workers, reply proposals, single write path with undo. Needs `SLACK_BOT_TOKEN` to run live |
 
-Apollo and Henry have no integration at all, by design.
+Apollo and Henry have no integration at all, by design. Slack is not part of this
+repo: it is handled elsewhere.
 
 ---
 
@@ -105,23 +105,6 @@ into its context. Any failure falls back to the heuristic and flags the proposal
 `analyst_fallback` — a worker always returns a proposal.
 
 ---
-
-## Slack mentions
-
-```bash
-make slack                      # offline, against tests/fixtures/mentions.json
-python3 -m agents.slack_leader.leader run --events events.json   # live
-python3 -m core.slack_execute run s_0003            # dry run
-python3 -m core.slack_execute run s_0003 --execute  # post, after approval
-python3 -m core.slack_execute undo <channel>:<ts> --execute
-```
-
-A mention becomes a reply *proposal*. Nothing posts without approval and an
-explicit `--execute`, because a Slack message can be deleted but not unread.
-Never-touch subjects get total silence — no reply, no acknowledgement.
-
-Needs the bot token (`xoxb-`), not the app-level token (`xapp-`): Slack answers
-`not_allowed_token_type` to the latter for every read and every post.
 
 ## Reviewing from your phone
 

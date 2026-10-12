@@ -81,7 +81,7 @@ def _all_logger_names() -> list[str]:
 
     A hardcoded tuple here drifts the moment a new module calls log.get(...) —
     it did: brief.errors() scanned 5 loggers while 29 exist, so failures in
-    jira_leader (where the queue's own errors land), slack_*, mcp, requester
+    jira_leader (where the queue's own errors land), mcp, requester
     and everything else were never counted in the one place meant to surface
     them.
     """

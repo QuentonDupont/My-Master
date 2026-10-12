@@ -1,4 +1,4 @@
-.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels tick tick-install corpus-refresh corpus-refresh-install mcp connector-install connector-url
+.PHONY: help test demo demo-reset queue batch brief rules clean mirror mirror-apply labels tick tick-install corpus-refresh corpus-refresh-install mcp connector-install connector-url
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -29,7 +29,7 @@ demo-reset:  ## wipe local state (ledger, proposals, batches) — needs CONFIRM=
 		exit 1; \
 	fi
 	rm -f corpus/ledger.db corpus/ledger.db-wal corpus/ledger.db-shm
-	rm -rf review/proposals review/slack_proposals review/batch_* review/brief_*
+	rm -rf review/proposals review/batch_* review/brief_*
 	rm -rf review/rule_proposals_* review/mobile
 
 queue:  ## poll PESD1 and triage (live; needs .env)
@@ -41,20 +41,6 @@ batch:  ## assemble the approval batch
 work-agent:  ## research open intake, prepare fix plans and requester draft outbox
 	python3 -m agents.jira_leader.work_agent
 
-slack:  ## triage Slack mentions (offline fixtures)
-	python3 -m agents.slack_leader.leader run --file tests/fixtures/mentions.json
-
-poll:  ## one poller sweep (live; needs SLACK_BOT_TOKEN)
-	python3 -m agents.slack_leader.poller once
-
-poll-fixtures:  ## one poller sweep against fixture history, cursor untouched
-	python3 -m agents.slack_leader.poller once \
-		--history tests/fixtures/slack_history.json \
-		--lookback 1000000000 --no-commit
-
-poll-install:  ## install the launchd poller (refuses without an xoxb- token)
-	./tools/install_poller.sh
-
 connector-install:  ## keep the MCP server running across reboots
 	./tools/install_connector.sh
 
@@ -63,9 +49,6 @@ connector-url:  ## the permanent connector URL, and whether it answers
 
 mcp:  ## MCP server for the Claude app connector (needs MCP_AUTH_TOKEN)
 	python3 -m tools.mcp_server --host $(or $(HOST),127.0.0.1)
-
-panel:  ## review page served from this machine (add HOST=0.0.0.0 for your phone)
-	python3 -m tools.panel --host $(or $(HOST),127.0.0.1)
 
 tick:  ## one board pass: sweep, read labels, mirror status
 	./tools/board_tick.sh
