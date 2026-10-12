@@ -1,0 +1,49 @@
+{
+  "items": [
+    {
+      "id": "slack:C0OPS:1758700000.001",
+      "ts": "2026-09-24T09:05:00+07:00",
+      "author": "Unni Purushothaman",
+      "title": "#ops",
+      "text": "We agreed to ship the RMA sync fix on Friday. I'll send the release note by EOD Thursday.",
+      "link": "https://pomelo.slack.com/archives/C0OPS/p1758700000001",
+      "kind": "message"
+    },
+    {
+      "id": "slack:C0OPS:1758700100.002",
+      "ts": "2026-09-24T09:20:00+07:00",
+      "author": "Sabari Nath",
+      "title": "#ops",
+      "text": "morning all, coffee machine is fixed",
+      "link": "https://pomelo.slack.com/archives/C0OPS/p1758700100002",
+      "kind": "message"
+    },
+    {
+      "id": "gmail:18f2a",
+      "ts": "2026-09-24T08:40:00+07:00",
+      "from": "vishal@pomelofashion.com",
+      "subject": "Franchise PO cost — blocked on NetSuite access",
+      "body": "Quenton, can you approve the NetSuite role change? We are blocked until then.",
+      "link": "https://mail.google.com/mail/u/0/#all/18f2a",
+      "kind": "email"
+    },
+    {
+      "id": "cal:ev1@2026-09-24T14:00:00+07:00",
+      "ts": "2026-09-24T14:00:00+07:00",
+      "author": "ops-lead@pomelofashion.com",
+      "title": "Weekly ops sync",
+      "text": "Agenda: RMA sync, franchise PO cost",
+      "link": "https://calendar.google.com/event?eid=ev1",
+      "kind": "event",
+      "meta": {"end": "2026-09-24T14:30:00+07:00"}
+    },
+    {
+      "id": "gmail:18f2b",
+      "ts": "2026-09-24T07:10:00+07:00",
+      "from": "newsletter@example.com",
+      "subject": "Weekly digest",
+      "body": "Here is your weekly roundup of articles.",
+      "kind": "email"
+    }
+  ]
+}

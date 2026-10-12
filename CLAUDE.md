@@ -66,6 +66,19 @@ Do not query, write to, or reason about any other Jira project.
      separate human-gated step.
    - the team reports to the board owner directly, not through the Jira Leader
      or the Chief of Staff.
+   **A third standing team, added 24 Sep 2026 by the board owner: the Digital
+   Twin** (`agents/digital_twin/`) — his personal Chief of Staff, built from the
+   staff starter file in `agents/digital_twin/spec/`. It is **read and draft
+   only**: it reads the sources he has allowed in `config/twin.yml` (pasted
+   snapshots, the triage ledger, Slack, Gmail, Calendar, Drive), keeps his Work
+   Profile and Task List under `twin/` (gitignored), writes morning and
+   end-of-day updates, and drafts messages in his voice. It never sends: the
+   package has no write client and `tests/test_digital_twin.py` asserts it
+   imports none; `core/google_client.py` has no method that writes. He sends a
+   draft himself, from the app, and the twin records the proof. It reports to
+   him directly. Turning a source on in config is not the same as it working —
+   only a passed `lead test <source>` marks it "working" on the profile.
+
 3. **Never-touch categories** are escalated to the human with no comment and no
    clone, regardless of confidence: refunds, payments, pricing, customer PII,
    stock adjustments, account access/permissions.
@@ -153,6 +166,7 @@ is a sub-flow. Never widen an agent to do a second thing — add a second agent.
   /jira_leader     gates, analysis, clone brief, labels, batch, re-entry, research
   /chief_of_staff  brief, health, rules, daily report
   /marketing_onsite content tasks, surfaces, SOPs, change-plan drafting
+  /digital_twin    personal Chief of Staff — read and draft only, reports to owner
 /core
   flow.py        agents, flows, triggers — the runtime and its guardrails
   scheduler.py   the tick: what is due, locks, run history, alerts
@@ -166,6 +180,7 @@ is a sub-flow. Never widen an agent to do a second thing — add a second agent.
   rules.md       human-approved routing and handling rules — injected into workers
   corrections.jsonl  append-only log of human edits to proposals
 /review          generated approval batches (gitignored)
+/twin            the Digital Twin's records: profile, tasks, drafts, cursors (gitignored)
 /tests
 ```
 

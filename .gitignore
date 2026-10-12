@@ -11,6 +11,8 @@ logs/*
 !logs/.gitkeep
 review/*
 !review/.gitkeep
+twin/*
+!twin/.gitkeep
 
 # python
 __pycache__/

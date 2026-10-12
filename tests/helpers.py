@@ -39,13 +39,15 @@ def sandbox():
             "LEDGER_DB": config.LEDGER_DB, "CORPUS_DB": config.CORPUS_DB,
             "REVIEW_DIR": config.REVIEW_DIR, "LOG_DIR": config.LOG_DIR,
             "CORRECTIONS": config.CORRECTIONS, "KNOWLEDGE_DIR": config.KNOWLEDGE_DIR,
-            "RULES_MD": config.RULES_MD, "STORE": proposals.STORE,
+            "RULES_MD": config.RULES_MD, "TWIN_DIR": config.TWIN_DIR,
+            "STORE": proposals.STORE,
         }
         config.LEDGER_DB = root / "ledger.db"
         config.CORPUS_DB = root / "corpus.db"
         config.REVIEW_DIR = root / "review"
         config.LOG_DIR = root / "logs"
         config.KNOWLEDGE_DIR = root / "knowledge"
+        config.TWIN_DIR = root / "twin"
         config.CORRECTIONS = root / "knowledge" / "corrections.jsonl"
         # RULES_MD = KNOWLEDGE_DIR / "rules.md" is computed once at import time
         # in core/config.py, so reassigning KNOWLEDGE_DIR above does NOT move
@@ -55,7 +57,7 @@ def sandbox():
         config.RULES_MD = root / "knowledge" / "rules.md"
         proposals.STORE = root / "review" / "proposals"
         for d in (config.REVIEW_DIR, config.LOG_DIR, config.KNOWLEDGE_DIR,
-                  proposals.STORE):
+                  config.TWIN_DIR, proposals.STORE):
             d.mkdir(parents=True, exist_ok=True)
         # Like RULES_MD: the content-task and plan stores are computed from
         # REVIEW_DIR at import time, so they need redirecting explicitly.

@@ -16,6 +16,8 @@ CORPUS_DIR = ROOT / "corpus"
 KNOWLEDGE_DIR = ROOT / "knowledge"
 REVIEW_DIR = ROOT / "review"
 LOG_DIR = ROOT / "logs"
+#: the Digital Twin's own records — personal, so gitignored like review/
+TWIN_DIR = ROOT / "twin"
 
 LEDGER_DB = ROOT / "corpus" / "ledger.db"
 CORPUS_DB = ROOT / "corpus" / "corpus.db"
@@ -87,6 +89,12 @@ def never_touch() -> dict:
 def confluence() -> dict:
     path = CONFIG_DIR / "confluence.yml"
     return load_yaml(path) if path.exists() else {"spaces": []}
+
+
+@lru_cache(maxsize=None)
+def twin() -> dict:
+    path = CONFIG_DIR / "twin.yml"
+    return load_yaml(path) if path.exists() else {"sources": [], "alerts": {}}
 
 
 @lru_cache(maxsize=None)
