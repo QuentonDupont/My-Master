@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pomelo.flows</string>
+
+  <!-- The one scheduled job. Every minute it asks each flow whether it is due
+       (its schedule has come round, or an event it listens for arrived) and
+       starts each due flow in its own process. Replaces board-tick,
+       corpus-refresh and daily_report. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>-m</string>
+    <string>flows</string>
+    <string>tick</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/quenton-d/My-Master</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/quenton-d/My-Master</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>LOG_STDERR</key>
+    <string>0</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>60</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- The tick exits in well under a second; the flows it starts run on in
+       their own sessions and must not be killed when it does. Each flow holds
+       its own lock, so they never stack up behind themselves. -->
+  <key>AbandonProcessGroup</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/quenton-d/My-Master/logs/flows_tick.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/quenton-d/My-Master/logs/flows_tick.err</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

@@ -39,7 +39,7 @@ def sandbox():
             "LEDGER_DB": config.LEDGER_DB, "CORPUS_DB": config.CORPUS_DB,
             "REVIEW_DIR": config.REVIEW_DIR, "LOG_DIR": config.LOG_DIR,
             "CORRECTIONS": config.CORRECTIONS, "KNOWLEDGE_DIR": config.KNOWLEDGE_DIR,
-            "TWIN_DIR": config.TWIN_DIR,
+            "RULES_MD": config.RULES_MD, "TWIN_DIR": config.TWIN_DIR,
             "STORE": proposals.STORE,
         }
         config.LEDGER_DB = root / "ledger.db"
@@ -49,14 +49,27 @@ def sandbox():
         config.KNOWLEDGE_DIR = root / "knowledge"
         config.TWIN_DIR = root / "twin"
         config.CORRECTIONS = root / "knowledge" / "corrections.jsonl"
+        # RULES_MD = KNOWLEDGE_DIR / "rules.md" is computed once at import time
+        # in core/config.py, so reassigning KNOWLEDGE_DIR above does NOT move
+        # it — it silently keeps pointing at the real repo's rules.md unless
+        # redirected here too. Found live: a sandboxed test reading approved
+        # rules picked up the real 2 approved rules from the actual repo.
+        config.RULES_MD = root / "knowledge" / "rules.md"
         proposals.STORE = root / "review" / "proposals"
         for d in (config.REVIEW_DIR, config.LOG_DIR, config.KNOWLEDGE_DIR,
                   config.TWIN_DIR, proposals.STORE):
             d.mkdir(parents=True, exist_ok=True)
+        # Like RULES_MD: the content-task and plan stores are computed from
+        # REVIEW_DIR at import time, so they need redirecting explicitly.
+        from agents.marketing_onsite import tasks as mo_tasks, worker as mo_worker
+        saved_mo = (mo_tasks.STORE, mo_worker.PLAN_DIR)
+        mo_tasks.STORE = root / "review" / "content_tasks"
+        mo_worker.PLAN_DIR = root / "review" / "content_plans"
         try:
             with fixture_boards():
                 yield root
         finally:
+            mo_tasks.STORE, mo_worker.PLAN_DIR = saved_mo
             for key, value in saved.items():
                 if key == "STORE":
                     proposals.STORE = value

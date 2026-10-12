@@ -1,3 +1,26 @@
+# Handoff — 12 Oct 2026: flows refactor (branch `refactor/agentic-flows`)
+
+Everything recurring is now single-purpose agents chained into flows, each
+with a trigger (CLAUDE.md > Architecture). On the branch, not yet live:
+
+* **Live machine still runs the old jobs** (`board-tick`, `corpus-refresh`,
+  `daily_report`). To switch: merge, then `./tools/install_flows.sh` (retires
+  them, installs `com.pomelo.flows`). `./tools/install_flows.sh rollback`
+  restores them; their scripts still work against the refactored code.
+* The 09:00 report **failed on 12 Oct** — `MailerNotConfigured`, no Gmail auth.
+  Run `python3 tools/gmail_oauth_setup.py` once. Under flows this failure
+  fails the daily-report flow and raises one alert, instead of only an exit 1.
+* New behaviour: `rules` now actually runs weekly (Mon 08:30, proposals only);
+  `confluence` refreshes weekly (Mon 07:00, read-only); research runs every
+  15m instead of every 5m; mirror moves are journalled in `execution_log`.
+* Merged with `main` (Digital Twin). The Twin reads 6 Slack channels, so on
+  12 Oct the board owner chose to keep `core/slack_client.py` as a **read-only**
+  client for it: no write client, an allowlist of read methods, and
+  `tests/test_slack_read_only.py` guarding both. The Slack Leader stays removed.
+* `make demo` claims nothing, and did before this branch: it reads the live
+  `config/boards.yml` (open status "Waiting Support") against fixtures marked
+  "Waiting for Support". The tests use fixture boards and are unaffected.
+
 # Handoff — 18 Sep 2026
 
 Read this with CLAUDE.md. It is the state of play, not the spec.
@@ -55,37 +78,16 @@ Live once the requester confirms.
 
 ## Open, waiting on the board owner
 
-1. **`SLACK_BOT_TOKEN` (xoxb-)** — the one thing preventing the Slack Leader from
-   running unattended. https://api.slack.com/apps/A0BA4UVKA9M/oauth → Bot Token
-   Scopes (`app_mentions:read`, `channels:history`, `groups:history`,
-   `chat:write`, `users:read`, `users:read.email`) → Install to Workspace.
-   The `xapp-` tokens already in .env cannot read or post.
-2. **PRDT-11559 → "Close as Won't Do"** — it duplicates PRDT-11539 / PRDT-11536.
+1. **PRDT-11559 → "Close as Won't Do"** — it duplicates PRDT-11539 / PRDT-11536.
    Recorded in `review/recommendations.jsonl` and shown on the review page.
    The system never closes a ticket itself (invariant 9).
-3. **BUSK board 377** — asked for, refused: outside `allowed_projects`. Proposed
+2. **BUSK board 377** — asked for, refused: outside `allowed_projects`. Proposed
    fix is a readable-vs-writable split so BUSK can be tracked but never written
    to. Needs the owner's yes before CLAUDE.md's scope rule changes.
-4. **Confluence spaces** — PM is indexed (329 pages). PSD (Pomelo Service Desk),
+3. **Confluence spaces** — PM is indexed (329 pages). PSD (Pomelo Service Desk),
    DO, PRA and POMQ are listed as candidates in `config/confluence.yml`.
-5. **`ANTHROPIC_API_KEY`** — unset, so every worker runs the heuristic analyst.
+4. **`ANTHROPIC_API_KEY`** — unset, so every worker runs the heuristic analyst.
    This is the biggest single quality lever left.
-
-## Slack, next session
-
-The claude.ai Slack connector is authenticated; its tools load on a fresh start.
-
-- **Connector mode is built**: drafts are made locally, approved on the phone,
-  and posted by the connector under the approver's own identity —
-  `core.slack_execute.record_external_reply` records who posted and how.
-  `python -m agents.slack_leader.mobile ready` lists what to send.
-- The board owner reported an unanswered mention. Nothing is scheduled and
-  nothing subscribes to Slack events: the leader is a command, not a daemon.
-  Making it react needs the bot token plus either a launchd poller or a Socket
-  Mode listener. (launchd cannot read scripts under ~/Desktop on this machine —
-  install under ~/Library/Application Support.)
-- **Requester updates** are the agreed next feature, after mentions. Undecided:
-  whether an update goes to the requester in a DM or back to the channel.
 
 ## Digital Twin — 24 Sep
 
@@ -120,10 +122,10 @@ keyword heuristics today.
 - Keep developer-facing text direct and precise. They should not have to read
   through a ticket to find the ask.
 - Never delete a ticket — recommend "Close as Won't Do" instead (invariant 9).
-- Every outbound message, Jira or Slack, is approved by a human first.
+- Every outbound message is approved by a human first.
 
 ## The review page
 
-https://claude.ai/artifact/UBNzgPpL7W16vZVh4a8m2k — proposals, Slack replies,
+https://claude.ai/artifact/UBNzgPpL7W16vZVh4a8m2k — proposals,
 close recommendations and board priorities. Seeded with
 `python -m agents.jira_leader.mobile export` and the Artifact db tools.

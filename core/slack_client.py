@@ -1,12 +1,11 @@
-"""Slack Web API wrapper. Read and write are two classes, as with Jira.
+"""Slack Web API wrapper — READ ONLY.
 
-* `SlackReadClient` cannot post — it has no method that writes.
-* `SlackWriteClient` refuses to do anything unless constructed with
-  `execute=True`; the default is a dry run that logs what it would have said.
-  Only `core.slack_execute` may construct it with execute=True.
-
-Every write has its undo beside it (invariant 8). A deleted message was still
-delivered, so a reply is never posted without human approval.
+Kept for the Digital Twin, which reads the channels allowed in
+config/twin.yml. The Slack Leader, its write client and its poller were
+removed on 1 Oct 2026 ("it will be handled elsewhere"); on 12 Oct 2026 the
+board owner chose to keep this read client for the Twin. There is no write
+client in this repo: `SlackReadClient` has no method that posts, and
+tests/test_slack_read_only.py asserts that stays true.
 
 Needs SLACK_BOT_TOKEN (xoxb-). The app-level token (xapp-) authenticates the app
 for Socket Mode and cannot read or post: Slack answers `not_allowed_token_type`.
@@ -25,6 +24,15 @@ LOG = log.get("slack")
 
 API = "https://slack.com/api"
 
+#: Every Slack Web API method this repo may call. All are reads. Anything else
+#: — chat.postMessage, chat.delete, reactions.add, ... — is refused before a
+#: request is built.
+READ_METHODS = frozenset({
+    "auth.test", "users.conversations", "conversations.history",
+    "conversations.replies", "users.info", "conversations.info",
+    "chat.getPermalink",
+})
+
 
 class SlackError(RuntimeError):
     def __init__(self, method: str, error: str, detail: dict | None = None) -> None:
@@ -40,21 +48,16 @@ class _Base:
         self.token = token if token is not None else config.env(self.TOKEN_ENV)
         self.timeout = timeout
 
-    def _call(self, method: str, params: dict | None = None,
-              body: dict | None = None) -> dict:
+    def _call(self, method: str, params: dict | None = None) -> dict:
+        if method not in READ_METHODS:
+            raise SlackError(method, "refused: this repo only reads Slack")
         if not self.token:
             raise SlackError(method, "SLACK_BOT_TOKEN is not set")
         url = f"{API}/{method}"
-        data = None
-        headers = {"Authorization": f"Bearer {self.token}"}
-        if body is not None:
-            data = json.dumps(body).encode("utf-8")
-            headers["Content-Type"] = "application/json; charset=utf-8"
-        elif params:
+        if params:
             url += "?" + urllib.parse.urlencode(params)
-        req = urllib.request.Request(url, data=data, method="POST" if data else "GET")
-        for key, value in headers.items():
-            req.add_header(key, value)
+        req = urllib.request.Request(url, method="GET")
+        req.add_header("Authorization", f"Bearer {self.token}")
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 payload = json.loads(resp.read().decode("utf-8") or "{}")
@@ -74,9 +77,8 @@ class SlackReadClient(_Base):
     "someone tagged me" visible at all. A bot can only ever see channels it was
     invited to and can never see a person's DMs.
 
-    Reading as a person and posting as one are different risks, so they use
-    different credentials: `SlackWriteClient` stays on the bot token and will
-    refuse a user token outright.
+    There is no posting in this repo at all: `_call` refuses any API method
+    not in READ_METHODS.
     """
 
     TOKEN_ENV = "SLACK_USER_TOKEN"
@@ -154,59 +156,6 @@ class SlackReadClient(_Base):
         return self._call("chat.getPermalink",
                           params={"channel": channel, "message_ts": ts}).get(
                               "permalink", "")
-
-
-class SlackWriteClient(_Base):
-    """Every method is a no-op unless execute=True. Every method has an undo.
-
-    Always the bot token, never a user token: a reply posted with `xoxp-` is
-    indistinguishable from the person typing it, with no app attribution and no
-    separate entry in the audit log. If posting as the human is wanted, it goes
-    through the approver's own client (see `core.slack_execute`), not from here.
-    """
-
-    TOKEN_ENV = "SLACK_BOT_TOKEN"
-
-    def __init__(self, *args, execute: bool = False, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        if (self.token or "").startswith("xoxp-"):
-            raise SlackError("init", "refusing to post with a user token; "
-                                     "SlackWriteClient uses SLACK_BOT_TOKEN")
-        self.execute = bool(execute)
-        self.performed: list[dict] = []
-
-    def _do(self, action: str, detail: dict, fn) -> dict:
-        if not self.execute:
-            LOG.info("slack.dry_run", action=action, **detail)
-            return {"dry_run": True, "action": action, **detail}
-        result = fn()
-        self.performed.append({"action": action, **detail})
-        LOG.info("slack.write", action=action, **detail)
-        return result
-
-    def post_reply(self, channel: str, thread_ts: str, text: str) -> dict:
-        return self._do("post_reply",
-                        {"channel": channel, "thread_ts": thread_ts,
-                         "chars": len(text)},
-                        lambda: self._call("chat.postMessage", body={
-                            "channel": channel, "thread_ts": thread_ts,
-                            "text": text, "unfurl_links": False}))
-
-    def delete_message(self, channel: str, ts: str) -> dict:  # undo of post_reply
-        return self._do("delete_message", {"channel": channel, "ts": ts},
-                        lambda: self._call("chat.delete", body={
-                            "channel": channel, "ts": ts}))
-
-    def add_reaction(self, channel: str, ts: str, name: str) -> dict:
-        return self._do("add_reaction", {"channel": channel, "ts": ts, "name": name},
-                        lambda: self._call("reactions.add", body={
-                            "channel": channel, "timestamp": ts, "name": name}))
-
-    def remove_reaction(self, channel: str, ts: str, name: str) -> dict:  # undo
-        return self._do("remove_reaction",
-                        {"channel": channel, "ts": ts, "name": name},
-                        lambda: self._call("reactions.remove", body={
-                            "channel": channel, "timestamp": ts, "name": name}))
 
 
 def main(argv: list[str] | None = None) -> int:

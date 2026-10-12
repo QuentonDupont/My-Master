@@ -1,4 +1,4 @@
-.PHONY: help test demo demo-reset queue batch brief rules clean poll poll-fixtures poll-install mirror mirror-apply panel labels tick tick-install mcp connector-install connector-url twin twin-setup twin-morning twin-eod twin-export twin-alerts
+.PHONY: help test flows flow flows-status flows-runs flows-tick flows-install flows-rollback execute demo demo-reset queue batch brief rules clean mirror mirror-apply labels tick tick-install corpus-refresh corpus-refresh-install mcp connector-install connector-url twin twin-setup twin-morning twin-eod twin-export twin-alerts
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -6,7 +6,8 @@ help:
 test:  ## run the test suite (stdlib unittest, no network)
 	python3 -m unittest discover -s tests -t . -v
 
-demo: demo-reset  ## full offline run: corpus -> triage -> review batch -> brief
+demo:  ## full offline run: wipes local demo state, then corpus -> triage -> review batch -> brief
+	@$(MAKE) demo-reset CONFIRM=1
 	./tools/seed_demo.sh
 	python3 -m agents.jira_leader.queue run \
 		--file tests/fixtures/inbox.jsonl \
@@ -14,11 +15,22 @@ demo: demo-reset  ## full offline run: corpus -> triage -> review batch -> brief
 	python3 -m agents.jira_leader.batch assemble
 	python3 -m agents.chief_of_staff.brief brief
 
-demo-reset:  ## wipe local state (ledger, proposals, batches, logs)
+# demo-reset wipes corpus/ledger.db — the SAME file board_tick.sh writes to
+# every 5 minutes on the live system. It no longer touches logs/*.jsonl: those
+# are now operational history (execution_log, corrections timing), not demo
+# fixtures, and a demo run should not be able to erase them. Requires
+# CONFIRM=1 so it can't be triggered by a bare `make demo-reset` typo once
+# there is a live ledger worth losing.
+demo-reset:  ## wipe local state (ledger, proposals, batches) — needs CONFIRM=1
+	@if [ "$(CONFIRM)" != "1" ]; then \
+		echo "demo-reset deletes corpus/ledger.db — the live board state if"; \
+		echo "this system is running against real Jira, not just a demo."; \
+		echo "Re-run as: make demo-reset CONFIRM=1"; \
+		exit 1; \
+	fi
 	rm -f corpus/ledger.db corpus/ledger.db-wal corpus/ledger.db-shm
-	rm -rf review/proposals review/slack_proposals review/batch_* review/brief_*
+	rm -rf review/proposals review/batch_* review/brief_*
 	rm -rf review/rule_proposals_* review/mobile
-	rm -f logs/*.jsonl
 
 queue:  ## poll PESD1 and triage (live; needs .env)
 	python3 -m agents.jira_leader.queue run
@@ -26,19 +38,8 @@ queue:  ## poll PESD1 and triage (live; needs .env)
 batch:  ## assemble the approval batch
 	python3 -m agents.jira_leader.batch assemble
 
-slack:  ## triage Slack mentions (offline fixtures)
-	python3 -m agents.slack_leader.leader run --file tests/fixtures/mentions.json
-
-poll:  ## one poller sweep (live; needs SLACK_BOT_TOKEN)
-	python3 -m agents.slack_leader.poller once
-
-poll-fixtures:  ## one poller sweep against fixture history, cursor untouched
-	python3 -m agents.slack_leader.poller once \
-		--history tests/fixtures/slack_history.json \
-		--lookback 1000000000 --no-commit
-
-poll-install:  ## install the launchd poller (refuses without an xoxb- token)
-	./tools/install_poller.sh
+work-agent:  ## research open intake, prepare fix plans and requester draft outbox
+	python3 -m agents.jira_leader.work_agent
 
 connector-install:  ## keep the MCP server running across reboots
 	./tools/install_connector.sh
@@ -49,14 +50,41 @@ connector-url:  ## the permanent connector URL, and whether it answers
 mcp:  ## MCP server for the Claude app connector (needs MCP_AUTH_TOKEN)
 	python3 -m tools.mcp_server --host $(or $(HOST),127.0.0.1)
 
-panel:  ## review page served from this machine (add HOST=0.0.0.0 for your phone)
-	python3 -m tools.panel --host $(or $(HOST),127.0.0.1)
+flows:  ## every flow: its trigger and its chain of agents
+	python3 -m flows list
 
-tick:  ## one board pass: sweep, read labels, mirror status
+flow:  ## run one flow now, dry-run (FLOW=intake; add EXEC=--execute to write)
+	python3 -m flows run $(FLOW) $(EXEC)
+
+flows-status:  ## last run, lock and pending events per flow
+	python3 -m flows status
+
+flows-runs:  ## recent run history (FLOW=name to filter)
+	python3 -m flows runs $(FLOW)
+
+flows-tick:  ## start every due flow once, here (what launchd runs each minute)
+	python3 -m flows tick
+
+flows-install:  ## schedule the flows (one launchd job) and retire the old jobs
+	./tools/install_flows.sh
+
+flows-rollback:  ## back to the old per-job launchd schedules
+	./tools/install_flows.sh rollback
+
+execute:  ## carry out approved proposals: dry run; EXEC=--execute to write to Jira
+	python3 -m flows run execute --confirm $(EXEC)
+
+tick:  ## legacy: one board pass via the old shell script (rollback only)
 	./tools/board_tick.sh
 
-tick-install:  ## run that pass every 5 minutes via launchd
+tick-install:  ## legacy: the old 5-minute launchd job (use flows-install)
 	./tools/install_tick.sh
+
+corpus-refresh:  ## catch tickets updated recently and reindex (read-only)
+	python3 -m flows run corpus
+
+corpus-refresh-install:  ## legacy: the old 2-hour launchd job (use flows-install)
+	./tools/install_corpus_refresh.sh
 
 labels:  ## read triage-approved / triage-rejected labels off the board
 	python3 -m agents.jira_leader.labels poll $(APPLY)
@@ -71,7 +99,7 @@ brief:  ## morning brief
 	python3 -m agents.chief_of_staff.brief brief
 
 rules:  ## propose rules from knowledge/corrections.jsonl
-	python3 -m agents.chief_of_staff.rules --write
+	python3 -m flows run rules
 
 twin:  ## digital twin: sources, records, drafts, alerts at a glance
 	python3 -m agents.digital_twin.lead status

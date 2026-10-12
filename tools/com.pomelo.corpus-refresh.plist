@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pomelo.corpus-refresh</string>
+
+  <!-- Absolute paths: launchd runs with a minimal environment and no profile. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/quenton-d/My-Master/tools/corpus_refresh.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/quenton-d/My-Master</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/quenton-d/My-Master</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+
+  <!-- Every 2 hours. Generous overlap against the 3-day updated-since window
+       in corpus_refresh.sh, so one missed or slow run never opens a gap. -->
+  <key>StartInterval</key>
+  <integer>7200</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- One pass at a time; a slow refresh must not stack up behind itself. -->
+  <key>AbandonProcessGroup</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/quenton-d/My-Master/logs/corpus_refresh.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/quenton-d/My-Master/logs/corpus_refresh.err</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

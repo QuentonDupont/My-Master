@@ -9,7 +9,7 @@
 #
 #   does      write proposals, record your triage-approved / triage-rejected
 #             labels, and move a PESD1 parent to match its PRDT clone
-#   does NOT  post a comment, create a clone, reply in Slack, or close anything
+#   does NOT  post a comment, create a clone, or close anything
 #
 # Executing a proposal stays a command you run. Nothing here reaches a requester.
 set -euo pipefail

@@ -174,6 +174,14 @@ def execute_proposal(proposal_id: str, *, execute: bool = False,
                                  dry_run=not execute)
         ticket = proposal.ticket
         clone = proposal.clone
+        email_update = proposal.requester_email_update
+        if email_update and execute:
+            current = (reader.issue(ticket, fields=email_update.field_id)
+                       .get("fields") or {}).get(email_update.field_id)
+            if current not in (email_update.previous, email_update.value):
+                raise ExecutionRefused("requester email changed since review; inspect the ticket")
+        else:
+            current = None
         # A previous attempt may have completed some steps before failing. Those
         # are recorded on the ledger row; never repeat them.
         done_comment = row["comment_id"] if execute else None
@@ -269,10 +277,17 @@ def execute_proposal(proposal_id: str, *, execute: bool = False,
                     led.note_progress(ticket, clone_key=clone_key)
 
                 # 3. link the two
-                run("link",
-                    lambda: writer.link_issues(clone_key, ticket, clone.link_type),
-                    {"inward": clone_key, "outward": ticket, "type": clone.link_type},
-                    compensate=lambda: _drop_link(writer, clone_key, ticket))
+                existing_link = (writer.find_link_id(clone_key, ticket)
+                                 if execute and done_clone else None)
+                if existing_link:
+                    result.steps.append(StepResult("link", True,
+                                                   {"skipped": "already linked",
+                                                    "link_id": existing_link}))
+                else:
+                    run("link",
+                        lambda: writer.link_issues(clone_key, ticket, clone.link_type),
+                        {"inward": clone_key, "outward": ticket, "type": clone.link_type},
+                        compensate=lambda: _drop_link(writer, clone_key, ticket))
 
                 # 4. assign
                 if clone.assignee:
@@ -285,11 +300,29 @@ def execute_proposal(proposal_id: str, *, execute: bool = False,
 
             # 5. transition PESD1
             if proposal.pesd1_transition:
-                run("transition",
-                    lambda: writer.transition(ticket, proposal.pesd1_transition),
-                    {"ticket": ticket, "to": proposal.pesd1_transition},
-                    compensate=(lambda: writer.transition(ticket, prior_status))
-                    if prior_status else None)
+                if execute and prior_status == proposal.pesd1_transition:
+                    result.steps.append(StepResult("transition", True,
+                                                   {"skipped": "already in target status",
+                                                    "status": prior_status}))
+                else:
+                    run("transition",
+                        lambda: writer.transition(ticket, proposal.pesd1_transition),
+                        {"ticket": ticket, "to": proposal.pesd1_transition},
+                        compensate=(lambda: writer.transition(ticket, prior_status))
+                        if prior_status else None)
+            if email_update:
+                if execute and current == email_update.value:
+                    result.steps.append(StepResult("requester_email", True,
+                                                   {"skipped": "already set"}))
+                else:
+                    run("requester_email",
+                        lambda: writer.set_requester_email(ticket, email_update.field_id,
+                                                           email_update.value),
+                        {"field_id": email_update.field_id,
+                         "previous": email_update.previous, "value": email_update.value,
+                         "dry_run": not execute},
+                        compensate=lambda: writer.set_requester_email(
+                            ticket, email_update.field_id, email_update.previous))
         except _StepFailed as failure:
             LOG.error("execute.failed", ticket=ticket, proposal=proposal_id,
                       step=failure.step, comment_id=result.comment_id,
@@ -353,6 +386,24 @@ def undo(ticket_key: str, *, execute: bool = False,
                 result.steps.append(StepResult(f"undo.{name}", False, detail, str(exc)))
                 result.ok = False
 
+        email_entries = [entry for entry in led.journal_for(ticket_key)
+                         if entry["step"] == "requester_email" and entry["ok"]
+                         and entry["proposal_id"] == row["proposal_id"]]
+        for entry in reversed(email_entries):
+            detail = json.loads(entry["detail"])
+            if detail.get("dry_run"):
+                continue
+            if execute:
+                current = JiraReadClient().issue(ticket_key, fields=detail["field_id"])["fields"].get(detail["field_id"])
+                if current != detail["value"]:
+                    result.ok = False
+                    result.steps.append(StepResult("undo.requester_email", False,
+                                                   error="email changed after execution; manual review required"))
+                    break
+            step("requester_email", lambda: writer.set_requester_email(
+                ticket_key, detail["field_id"], detail["previous"]),
+                {"field_id": detail["field_id"]})
+            break
         if prior:
             step("transition", lambda: writer.transition(ticket_key, prior), {"to": prior})
         if row["clone_key"]:
@@ -384,6 +435,324 @@ def undo(ticket_key: str, *, execute: bool = False,
         elif execute:
             led.record_error(ticket_key, "undo incomplete — see execution_log")
         return result
+    finally:
+        if own_ledger:
+            led.close()
+
+
+def create_dev_ticket(summary: str, description: str, *, assignee: str | None = None,
+                      labels: list[str] | None = None, priority: str = "Medium",
+                      epic: str | None = None, issue_type: str | None = None,
+                      execute: bool = False,
+                      writer: JiraWriteClient | None = None,
+                      reader: JiraReadClient | None = None) -> dict:
+    """A standalone PRDT ticket the human is directing by hand — not a triage
+    clone, not raised from a PESD1 ticket. Same rationale as create_epic: ticket
+    creation has no sanctioned automated path (CLAUDE.md), so this is a
+    deliberate, explicitly human-authorized one-off, run through the single
+    write module so there is still exactly one file that can write to Jira.
+
+    `epic` is required by PRDT's own Story screen (discovered by trial, not
+    documented by createmeta — see clone_fields()); pass one explicitly rather
+    than guessing from a component, since this ticket has no component label
+    to map from the way a triage clone does.
+    """
+    dev = config.boards()["development"]
+    project = config.dev_project()
+    reader = reader or JiraReadClient()
+    writer = writer or JiraWriteClient(execute=execute)
+    it = issue_type or config.dev_issue_type()
+
+    fields = dict(dev.get("required_fields") or {})
+    epic_field = dev.get("epic_link_field")
+    epic_key = epic or dev.get("default_epic")
+    if epic_field and epic_key:
+        fields[epic_field] = epic_key
+    elif epic_field:
+        raise ExecutionRefused(f"{project} requires an epic on a {it} and none "
+                               f"was given or configured as a default")
+
+    created = writer.create_issue(
+        project, summary, description, issue_type=it,
+        labels=labels or [], priority=priority,
+        extra_fields=screen_fields(fields, it, reader) if execute else fields)
+    key = created.get("key")
+
+    account_id = None
+    if assignee and execute and key:
+        account_id = _resolve_account_id(reader, assignee)
+        writer.assign(key, account_id)
+    LOG.info("execute.create_dev_ticket", project=project, key=key,
+             assignee=assignee, epic=epic_key, dry_run=not execute)
+    return {"key": key, "epic": epic_key, "assignee": assignee,
+           "account_id": account_id, "created": created}
+
+
+def backfill_requester_email(change: dict, *, execute: bool = False,
+                             ledger: ledger_mod.Ledger | None = None,
+                             reader: JiraReadClient | None = None,
+                             writer: JiraWriteClient | None = None) -> dict:
+    """Apply an explicitly requested, approved metadata correction only.
+
+    This repairs requester metadata on already-triaged tickets without replaying
+    their proposals or changing their ledger state. The caller saves a reviewed
+    change record with source evidence and the user's explicit approval. Like
+    one-off setup actions, it stays in the single Jira write module. Sensitive
+    business operations are not authorized by this field-only correction.
+    """
+    ticket = str(change.get("ticket", ""))
+    configured_field = config.boards()["intake"].get("requester_email_field")
+    field_id = change.get("field_id")
+    value = change.get("value")
+    if (change.get("decision") != "approve" or not change.get("approval_reason")
+            or not change.get("source") or not change.get("source_row")):
+        raise ExecutionRefused("email backfill requires an approved change with source evidence")
+    if not re.fullmatch(rf"{re.escape(config.intake_project())}-\d+", ticket):
+        raise ExecutionRefused("requester email backfill is restricted to intake tickets")
+    if not field_id or field_id not in (configured_field, "description"):
+        raise ExecutionRefused("email backfill must use the configured requester field or description")
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", str(value or "")):
+        raise ExecutionRefused("invalid requester email")
+    previous = change.get("previous")
+    if field_id == "description" and previous is not None and not isinstance(previous, str):
+        raise ExecutionRefused("original description must be text")
+    if field_id != "description" and previous not in (None, ""):
+        raise ExecutionRefused("email backfill cannot overwrite an existing value")
+    written_value = (f"Requester email: {value}" + ("\n\n" + previous if previous else "")
+                     if field_id == "description" else value)
+    reader = reader or JiraReadClient()
+    writer = writer or JiraWriteClient(execute=execute)
+    if bool(getattr(writer, "execute", False)) != bool(execute):
+        raise ExecutionRefused("writer execute flag disagrees with requested operation")
+    current = reader.issue(ticket, fields=field_id)["fields"].get(field_id)
+    if current == written_value:
+        return {"ticket": ticket, "ok": True, "skipped": "already set", "dry_run": not execute}
+    if (field_id == "description" and current != previous) or (field_id != "description" and current not in (None, "")):
+        raise ExecutionRefused("requester email changed; refusing to overwrite it")
+    if field_id == "description" and re.search(r"(?im)^Requester email\s*:", current or ""):
+        raise ExecutionRefused("description already contains requester email; inspect before changing")
+    detail = {**change, "previous": current, "written_value": written_value, "dry_run": not execute}
+    own_ledger = ledger is None
+    led = ledger or ledger_mod.Ledger()
+    try:
+        # Journal the original field before writing, including source and approval.
+        led.journal(ticket, "requester_email_backfill", "email_backfill.previous", True, detail)
+        try:
+            if field_id == "description":
+                writer.set_description(ticket, written_value)
+            else:
+                writer.set_requester_email(ticket, field_id, value)
+        except Exception as exc:
+            led.journal(ticket, "requester_email_backfill", "email_backfill", False,
+                        {**detail, "error": str(exc)})
+            raise
+        led.journal(ticket, "requester_email_backfill", "email_backfill", True, detail)
+        return {"ticket": ticket, "ok": True, "dry_run": not execute}
+    finally:
+        if own_ledger:
+            led.close()
+
+
+def undo_requester_email_backfill(change: dict, *, execute: bool = False,
+                                  ledger: ledger_mod.Ledger | None = None,
+                                  reader: JiraReadClient | None = None,
+                                  writer: JiraWriteClient | None = None) -> dict:
+    """Undo only a journalled backfill; preserve subsequent human changes."""
+    own_ledger = ledger is None
+    led = ledger or ledger_mod.Ledger()
+    try:
+        ticket = change.get("ticket")
+        records = [r for r in led.journal_for(ticket)
+                   if r["step"] == "email_backfill" and r["ok"]]
+        recorded = next((json.loads(r["detail"]) for r in reversed(records)
+                         if not json.loads(r["detail"]).get("dry_run")), None)
+        if not recorded or recorded.get("value") != change.get("value"):
+            raise ExecutionRefused("no matching executed email backfill to undo")
+        reader = reader or JiraReadClient()
+        writer = writer or JiraWriteClient(execute=execute)
+        if bool(getattr(writer, "execute", False)) != bool(execute):
+            raise ExecutionRefused("writer execute flag disagrees with requested operation")
+        field_id = recorded["field_id"]
+        current = reader.issue(ticket, fields=field_id)["fields"].get(field_id)
+        if current != recorded["written_value"]:
+            raise ExecutionRefused("requester email changed since backfill; refusing undo")
+        if field_id == "description":
+            writer.set_description(ticket, recorded["previous"])
+        else:
+            writer.set_requester_email(ticket, field_id, recorded["previous"])
+        led.journal(ticket, "requester_email_backfill", "undo.email_backfill", True,
+                    {**recorded, "dry_run": not execute})
+        return {"ticket": ticket, "ok": True, "dry_run": not execute}
+    finally:
+        if own_ledger:
+            led.close()
+
+
+def transition_after_review(change: dict, *, execute: bool = False,
+                            ledger: ledger_mod.Ledger | None = None,
+                            reader: JiraReadClient | None = None,
+                            writer: JiraWriteClient | None = None) -> dict:
+    """Apply a board owner's explicit status correction after triage execution.
+
+    This does not replay an EXECUTED proposal, post a comment, or make a clone.
+    The approved change identifies one intake ticket and the exact before/after
+    statuses. The prior status is journalled so the correction can be undone.
+    """
+    ticket = str(change.get("ticket") or "")
+    if (change.get("decision") != "approve" or not change.get("approval_reason")
+            or not re.fullmatch(rf"{re.escape(config.intake_project())}-\d+", ticket)
+            or change.get("from") != config.boards()["intake"]["open_status"]
+            or change.get("to") != config.boards()["intake"]["dev_transition"]):
+        raise ExecutionRefused("status correction requires an approved, scoped Waiting Support to To Do change")
+    reader = reader or JiraReadClient()
+    writer = writer or JiraWriteClient(execute=execute)
+    if bool(getattr(writer, "execute", False)) != bool(execute):
+        raise ExecutionRefused("writer execute flag disagrees with requested operation")
+    current = ((reader.issue(ticket, fields="status").get("fields") or {}).get("status") or {}).get("name")
+    if current == change["to"]:
+        return {"ticket": ticket, "ok": True, "skipped": "already To Do", "dry_run": not execute}
+    if current != change["from"]:
+        raise ExecutionRefused(f"{ticket} status changed to {current!r}; refusing correction")
+    if not any((t.get("to") or {}).get("name") == change["to"] for t in reader.transitions(ticket)):
+        raise ExecutionRefused(f"{ticket} does not offer the To Do transition")
+    own_ledger = ledger is None
+    led = ledger or ledger_mod.Ledger()
+    try:
+        row = led.get(ticket)
+        if row is None or not row.get("proposal_id"):
+            raise ExecutionRefused(f"{ticket} has no reviewed proposal in the ledger")
+        detail = {**change, "ledger_state": row["state"], "proposal_id": row["proposal_id"],
+                  "dry_run": not execute}
+        if execute:
+            led.journal(ticket, row["proposal_id"], "review_transition.previous", True, detail)
+        try:
+            writer.transition(ticket, change["to"])
+        except Exception as exc:
+            if execute:
+                led.journal(ticket, row["proposal_id"], "review_transition", False,
+                            {**detail, "error": str(exc)})
+            raise
+        if execute:
+            led.journal(ticket, row["proposal_id"], "review_transition", True, detail)
+        return {"ticket": ticket, "ok": True, "dry_run": not execute}
+    finally:
+        if own_ledger:
+            led.close()
+
+
+def undo_review_transition(change: dict, *, execute: bool = False,
+                           ledger: ledger_mod.Ledger | None = None,
+                           reader: JiraReadClient | None = None,
+                           writer: JiraWriteClient | None = None) -> dict:
+    """Restore a journalled reviewed transition if its target status remains."""
+    ticket = str(change.get("ticket") or "")
+    own_ledger = ledger is None
+    led = ledger or ledger_mod.Ledger()
+    try:
+        entries = [e for e in led.journal_for(ticket)
+                   if e["step"] == "review_transition" and e["ok"]]
+        record = next((json.loads(e["detail"]) for e in reversed(entries)
+                       if not json.loads(e["detail"]).get("dry_run")), None)
+        if not record or record.get("from") != change.get("from") or record.get("to") != change.get("to"):
+            raise ExecutionRefused("no matching executed review transition")
+        reader = reader or JiraReadClient()
+        writer = writer or JiraWriteClient(execute=execute)
+        if bool(getattr(writer, "execute", False)) != bool(execute):
+            raise ExecutionRefused("writer execute flag disagrees with requested operation")
+        current = ((reader.issue(ticket, fields="status").get("fields") or {}).get("status") or {}).get("name")
+        if current != record["to"]:
+            raise ExecutionRefused("status changed since review transition; refusing undo")
+        available = {(t.get("to") or {}).get("name") for t in reader.transitions(ticket)}
+        if record["from"] in available:
+            path = [record["from"]]
+        elif "Waiting for customer" in available:
+            path = ["Waiting for customer", record["from"]]
+        else:
+            raise ExecutionRefused("no return path to the prior status")
+        for index, status in enumerate(path):
+            if index:
+                offered = {(t.get("to") or {}).get("name") for t in reader.transitions(ticket)}
+                if status not in offered:
+                    raise ExecutionRefused("return path changed after the first undo transition")
+            writer.transition(ticket, status)
+        if execute:
+            led.journal(ticket, record["proposal_id"], "undo.review_transition", True,
+                        {**record, "dry_run": False})
+        return {"ticket": ticket, "ok": True, "dry_run": not execute}
+    finally:
+        if own_ledger:
+            led.close()
+
+
+def amend_work_brief(change: dict, *, execute: bool = False,
+                     ledger: ledger_mod.Ledger | None = None,
+                     reader: JiraReadClient | None = None,
+                     writer: JiraWriteClient | None = None) -> dict:
+    """Replace a reviewed ticket brief with a source-backed, reversible correction."""
+    ticket = str(change.get("ticket") or "")
+    if (change.get("decision") != "approve" or not change.get("approval_reason")
+            or not change.get("source") or not change.get("new_description")
+            or not re.fullmatch(r"(?:PESD1|PRDT)-\d+", ticket)):
+        raise ExecutionRefused("work brief correction requires approved scope and source")
+    reader = reader or JiraReadClient()
+    writer = writer or JiraWriteClient(execute=execute)
+    if bool(getattr(writer, "execute", False)) != bool(execute):
+        raise ExecutionRefused("writer execute flag disagrees with requested operation")
+    current = (reader.issue(ticket, fields="description").get("fields") or {}).get("description")
+    if current == change["new_description"]:
+        return {"ticket": ticket, "ok": True, "skipped": "already updated", "dry_run": not execute}
+    if current != change.get("previous"):
+        raise ExecutionRefused(f"{ticket} description changed since review")
+    own_ledger = ledger is None
+    led = ledger or ledger_mod.Ledger()
+    try:
+        row = led.get(ticket) if ticket.startswith("PESD1-") else None
+        proposal_id = row["proposal_id"] if row else None
+        detail = {**change, "dry_run": not execute}
+        if execute:
+            led.journal(ticket, proposal_id, "work_brief.previous", True, detail)
+        try:
+            writer.set_description(ticket, change["new_description"])
+        except Exception as exc:
+            if execute:
+                led.journal(ticket, proposal_id, "work_brief", False,
+                            {**detail, "error": str(exc)})
+            raise
+        if execute:
+            led.journal(ticket, proposal_id, "work_brief", True, detail)
+        return {"ticket": ticket, "ok": True, "dry_run": not execute}
+    finally:
+        if own_ledger:
+            led.close()
+
+
+def undo_work_brief(change: dict, *, execute: bool = False,
+                    ledger: ledger_mod.Ledger | None = None,
+                    reader: JiraReadClient | None = None,
+                    writer: JiraWriteClient | None = None) -> dict:
+    """Restore the prior brief only while the reviewed replacement is current."""
+    ticket = str(change.get("ticket") or "")
+    own_ledger = ledger is None
+    led = ledger or ledger_mod.Ledger()
+    try:
+        entries = [e for e in led.journal_for(ticket)
+                   if e["step"] == "work_brief" and e["ok"]]
+        record = next((json.loads(e["detail"]) for e in reversed(entries)
+                       if not json.loads(e["detail"]).get("dry_run")), None)
+        if not record or record.get("new_description") != change.get("new_description"):
+            raise ExecutionRefused("no matching executed work brief correction")
+        reader = reader or JiraReadClient()
+        writer = writer or JiraWriteClient(execute=execute)
+        if bool(getattr(writer, "execute", False)) != bool(execute):
+            raise ExecutionRefused("writer execute flag disagrees with requested operation")
+        current = (reader.issue(ticket, fields="description").get("fields") or {}).get("description")
+        if current != record["new_description"]:
+            raise ExecutionRefused("description changed after correction; refusing undo")
+        writer.set_description(ticket, record["previous"])
+        if execute:
+            led.journal(ticket, None, "undo.work_brief", True,
+                        {"source": record["source"], "dry_run": False})
+        return {"ticket": ticket, "ok": True, "dry_run": not execute}
     finally:
         if own_ledger:
             led.close()

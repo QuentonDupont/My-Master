@@ -54,6 +54,14 @@ TRANSITIONS: dict[str, set[str]] = {
 #: states that mean "this ticket is done unless its content changes".
 TERMINAL = {EXECUTED, REJECTED, DUPLICATE, ESCALATED, ROLLED_BACK}
 
+#: A CLAIMED row with no timeout is a silent trap: a worker thread that dies
+#: mid-flight (crash, OOM, a killed process) leaves the ticket claimed forever,
+#: and should_process() refuses to touch it again — every future sweep skips it
+#: with no error anywhere. 30 minutes is generous against a 5-minute sweep
+#: cadence; a row past it almost certainly means the worker that claimed it is
+#: gone, not still working.
+STALE_CLAIM_MINUTES = 30
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ledger (
   ticket_key      TEXT PRIMARY KEY,
@@ -82,22 +90,17 @@ CREATE TABLE IF NOT EXISTS execution_log (
 );
 CREATE INDEX IF NOT EXISTS execution_log_ticket_idx ON execution_log(ticket_key);
 
--- Slack threads the Slack Leader has handled. Same discipline as the ticket
--- ledger: a thread is answered once, and never re-answered unless it changed.
-CREATE TABLE IF NOT EXISTS slack_threads (
-  thread_key    TEXT PRIMARY KEY,   -- channel:thread_ts
-  channel       TEXT NOT NULL,
-  thread_ts     TEXT NOT NULL,
-  state         TEXT NOT NULL,
-  first_seen    TEXT NOT NULL,
-  last_processed TEXT NOT NULL,
-  content_hash  TEXT NOT NULL,      -- sha256 over the thread's messages
-  proposal_id   TEXT,
-  reply_ts      TEXT,               -- null until executed
-  attempts      INTEGER DEFAULT 0,
-  last_error    TEXT
+-- Append-only event journal. Every state change writes one row in the same
+-- transaction as the change, so flows triggered On(event) never miss one and
+-- never see one that was rolled back. Read through core.events.
+CREATE TABLE IF NOT EXISTS events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts          TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  ticket_key  TEXT,
+  data        TEXT
 );
-CREATE INDEX IF NOT EXISTS slack_threads_state_idx ON slack_threads(state);
+CREATE INDEX IF NOT EXISTS events_name_idx ON events(name);
 """
 
 _UPDATABLE = {"content_hash", "proposal_id", "clone_key", "comment_id", "last_error"}
@@ -109,6 +112,14 @@ class LedgerError(RuntimeError):
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def emit_in(conn: sqlite3.Connection, name: str, ticket_key: str | None = None,
+            **data) -> None:
+    """Append one event inside the caller's open transaction."""
+    conn.execute("INSERT INTO events (ts, name, ticket_key, data) VALUES (?, ?, ?, ?)",
+                 (now(), name, ticket_key,
+                  json.dumps(data, default=str) if data else None))
 
 
 def content_hash(summary: str, description: str, comment_count: int) -> str:
@@ -175,6 +186,39 @@ class Ledger:
         rows = self.conn.execute("SELECT state, COUNT(*) c FROM ledger GROUP BY state")
         return {r["state"]: r["c"] for r in rows}
 
+    # -- stale-claim reclaim -------------------------------------------------
+    def reclaim_stale_claims(self, older_than_minutes: int = STALE_CLAIM_MINUTES
+                              ) -> list[str]:
+        """Move CLAIMED rows past the staleness threshold back to NEW.
+
+        A crashed worker has no other way to release its ticket: should_process()
+        blocks CLAIMED unconditionally, so without this a dead worker's claim is
+        permanent. Call this once per sweep, before should_process() is consulted
+        for anything. Safe to call from multiple processes — each row transitions
+        independently and CLAIMED->NEW is already a legal move.
+        """
+        cutoff = (dt.datetime.now(dt.timezone.utc)
+                  - dt.timedelta(minutes=older_than_minutes)).isoformat(
+                      timespec="seconds")
+        stale = self.conn.execute(
+            "SELECT ticket_key, last_processed FROM ledger "
+            "WHERE state = ? AND last_processed < ?", (CLAIMED, cutoff)
+        ).fetchall()
+        reclaimed = []
+        for row in stale:
+            try:
+                self.transition(row["ticket_key"], NEW,
+                                last_error=f"reclaimed: CLAIMED since "
+                                           f"{row['last_processed']}, worker "
+                                           f"presumed dead")
+                reclaimed.append(row["ticket_key"])
+            except LedgerError:
+                continue  # raced with something else; leave it
+        if reclaimed:
+            LOG.warn("ledger.reclaimed_stale_claims", tickets=reclaimed,
+                     older_than_minutes=older_than_minutes)
+        return reclaimed
+
     # -- the re-processing gate (invariant #4) ------------------------------
     def should_process(self, ticket_key: str, hash_: str, status: str) -> tuple[bool, str]:
         """Decide whether a ticket may enter the queue. Pure read, no writes."""
@@ -226,6 +270,7 @@ class Ledger:
                        VALUES (?, ?, ?, ?, ?, 1)""",
                     (ticket_key, CLAIMED, now(), now(), hash_),
                 )
+                emit_in(conn, "ticket.claimed", ticket_key, previous=None)
                 LOG.info("ledger.claimed", ticket=ticket_key, previous=None)
                 return True
             state = row["state"]
@@ -239,6 +284,7 @@ class Ledger:
                 (CLAIMED, now(), hash_, ticket_key, state),
             )
             changed = conn.total_changes
+            emit_in(conn, "ticket.claimed", ticket_key, previous=state)
         LOG.info("ledger.claimed", ticket=ticket_key, previous=state)
         return bool(changed)
 
@@ -268,6 +314,8 @@ class Ledger:
                 values.append(value)
             values.append(ticket_key)
             conn.execute(f"UPDATE ledger SET {', '.join(sets)} WHERE ticket_key = ?", values)
+            emit_in(conn, f"ticket.{to_state.lower()}", ticket_key, previous=frm,
+                    proposal_id=fields.get("proposal_id") or row["proposal_id"])
         LOG.info("ledger.transition", ticket=ticket_key, **{"from": frm, "to": to_state})
         return self.get(ticket_key)  # type: ignore[return-value]
 
@@ -319,113 +367,6 @@ class Ledger:
             "SELECT * FROM execution_log WHERE ticket_key = ? ORDER BY id", (ticket_key,)
         )
         return [dict(r) for r in rows]
-
-
-class SlackLedger:
-    """Thread state. Wraps the same connection so there is still one state module."""
-
-    def __init__(self, ledger: "Ledger") -> None:
-        self.ledger = ledger
-        self.conn = ledger.conn
-
-    @staticmethod
-    def key(channel: str, thread_ts: str) -> str:
-        return f"{channel}:{thread_ts}"
-
-    def get(self, thread_key: str) -> dict | None:
-        row = self.conn.execute("SELECT * FROM slack_threads WHERE thread_key = ?",
-                                (thread_key,)).fetchone()
-        return dict(row) if row else None
-
-    def by_state(self, *states: str) -> list[dict]:
-        if not states:
-            rows = self.conn.execute(
-                "SELECT * FROM slack_threads ORDER BY last_processed DESC")
-        else:
-            marks = ",".join("?" * len(states))
-            rows = self.conn.execute(
-                f"SELECT * FROM slack_threads WHERE state IN ({marks}) "
-                f"ORDER BY last_processed DESC", states)
-        return [dict(r) for r in rows]
-
-    def by_proposal(self, proposal_id: str) -> dict | None:
-        row = self.conn.execute(
-            "SELECT * FROM slack_threads WHERE proposal_id = ?",
-            (proposal_id,)).fetchone()
-        return dict(row) if row else None
-
-    def should_process(self, thread_key: str, hash_: str) -> tuple[bool, str]:
-        row = self.get(thread_key)
-        if row is None:
-            return True, "new thread"
-        if row["state"] in (CLAIMED, PROPOSED, APPROVED, CORRECTED):
-            return False, f"already in flight ({row['state']})"
-        if row["content_hash"] == hash_:
-            return False, f"already handled ({row['state']}), thread unchanged"
-        return True, "thread has new messages"
-
-    def claim(self, channel: str, thread_ts: str, hash_: str) -> bool:
-        thread_key = self.key(channel, thread_ts)
-        with self.ledger._tx() as conn:
-            row = conn.execute("SELECT state FROM slack_threads WHERE thread_key = ?",
-                               (thread_key,)).fetchone()
-            if row is None:
-                conn.execute(
-                    """INSERT INTO slack_threads (thread_key, channel, thread_ts,
-                           state, first_seen, last_processed, content_hash, attempts)
-                       VALUES (?,?,?,?,?,?,?,1)""",
-                    (thread_key, channel, thread_ts, CLAIMED, now(), now(), hash_))
-                return True
-            if CLAIMED not in TRANSITIONS.get(row["state"], set()):
-                return False
-            conn.execute(
-                """UPDATE slack_threads SET state = ?, last_processed = ?,
-                       content_hash = ?, attempts = attempts + 1, last_error = NULL
-                   WHERE thread_key = ?""",
-                (CLAIMED, now(), hash_, thread_key))
-        LOG.info("slack_ledger.claimed", thread=thread_key)
-        return True
-
-    def transition(self, thread_key: str, to_state: str, **fields) -> dict:
-        allowed = {"proposal_id", "reply_ts", "last_error", "content_hash"}
-        bad = set(fields) - allowed
-        if bad:
-            raise LedgerError(f"fields not writable: {sorted(bad)}")
-        with self.ledger._tx() as conn:
-            row = conn.execute("SELECT * FROM slack_threads WHERE thread_key = ?",
-                               (thread_key,)).fetchone()
-            if row is None:
-                raise LedgerError(f"{thread_key} is not a tracked thread")
-            if to_state not in TRANSITIONS.get(row["state"], set()):
-                raise LedgerError(
-                    f"illegal transition {row['state']} -> {to_state} for {thread_key}")
-            sets = ["state = ?", "last_processed = ?"]
-            values: list = [to_state, now()]
-            for key, value in fields.items():
-                sets.append(f"{key} = ?")
-                values.append(value)
-            values.append(thread_key)
-            conn.execute(
-                f"UPDATE slack_threads SET {', '.join(sets)} WHERE thread_key = ?",
-                values)
-        LOG.info("slack_ledger.transition", thread=thread_key, to=to_state)
-        return self.get(thread_key)
-
-    def record_error(self, thread_key: str, error: str) -> None:
-        with self.ledger._tx() as conn:
-            conn.execute(
-                "UPDATE slack_threads SET last_error = ?, last_processed = ? "
-                "WHERE thread_key = ?", (str(error)[:2000], now(), thread_key))
-
-    def stats(self) -> dict[str, int]:
-        rows = self.conn.execute(
-            "SELECT state, COUNT(*) c FROM slack_threads GROUP BY state")
-        return {r["state"]: r["c"] for r in rows}
-
-
-def thread_hash(messages: list[dict]) -> str:
-    payload = "".join(f"{m.get('ts')}{m.get('text') or ''}" for m in messages)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,8 +1,8 @@
-"""Jira Leader — the standing agent that owns the queue and the ledger.
+"""Intake sweep — CLI wrapper over the intake flow (flows/intake.py).
 
-Polls the intake board, applies the re-processing gate (invariant 4), claims
-each ticket and spawns up to 5 ephemeral workers, one per ticket. Workers are
-terminated on completion; nothing is long-lived except this loop.
+Poll the intake board, apply the re-processing gate (invariant 4), claim, and
+triage each claimed ticket (up to 5 at once). Scheduled runs go through
+`python -m flows tick`; this is the same flow, run by hand.
 
     python -m agents.jira_leader.queue run --file tests/fixtures/inbox.jsonl
     python -m agents.jira_leader.queue run            # live, reads PESD1
@@ -11,13 +11,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from agents.historian.retrieval import Historian
-from agents.jira_leader import analysis as analysis_mod, worker as worker_mod
 from agents.jira_leader.sources import (FileTicketSource, JiraTicketSource,
-                                        KeyTicketSource, TicketSource, comment_count)
-from core import ledger as ledger_mod, log, requester as requester_mod
+                                        KeyTicketSource, TicketSource)
+from core import ledger as ledger_mod, log
 
 LOG = log.get("jira_leader")
 
@@ -25,72 +22,20 @@ MAX_WORKERS = 5
 
 
 def hash_of(issue: dict) -> str:
-    f = issue.get("fields", {}) or {}
-    return ledger_mod.content_hash(f.get("summary") or "", f.get("description") or "",
-                                   comment_count(issue))
-
-
-def _run_one(issue: dict, analyst_kind: str, sheet: list[dict], rules: str) -> dict:
-    """Runs on a worker thread: its own ledger + corpus connections."""
-    with ledger_mod.Ledger() as led, Historian() as hist:
-        outcome = worker_mod.process(issue, ledger=led, historian=hist,
-                                     analyst=analysis_mod.get_analyst(analyst_kind),
-                                     sheet=sheet, rules=rules)
-    return outcome.to_dict()
+    from flows.intake import hash_of as _hash_of
+    return _hash_of(issue)
 
 
 def run(source: TicketSource, *, limit: int | None = None,
         max_workers: int = MAX_WORKERS, analyst_kind: str = "auto",
         sheet_path: str | None = None) -> dict:
-    # Fail before touching the board: an unusable analyst found halfway through
-    # a run leaves some tickets claimed and unprocessed.
-    analysis_mod.get_analyst(analyst_kind)
+    """One intake sweep. The work is the intake flow (flows/intake.py)."""
+    from flows.intake import INTAKE
 
-    issues = source.open_tickets()
-    if limit:
-        issues = issues[:limit]
-    sheet = requester_mod.load_sheet(sheet_path)
-    rules = analysis_mod.load_rules()
-
-    claimed: list[dict] = []
-    skipped: list[dict] = []
-    with ledger_mod.Ledger() as led:
-        for issue in issues:
-            key = issue["key"]
-            status = ((issue.get("fields", {}) or {}).get("status") or {}).get("name", "")
-            hash_ = hash_of(issue)
-            ok, reason = led.should_process(key, hash_, status)
-            if not ok:
-                skipped.append({"ticket": key, "reason": reason})
-                continue
-            if not led.claim(key, hash_):
-                skipped.append({"ticket": key, "reason": "claim lost to another worker"})
-                continue
-            claimed.append(issue)
-
-    LOG.info("queue.claimed", claimed=len(claimed), skipped=len(skipped),
-             workers=min(max_workers, max(len(claimed), 1)))
-
-    outcomes: list[dict] = []
-    if claimed:
-        with ThreadPoolExecutor(max_workers=max_workers,
-                                thread_name_prefix="jira-worker") as pool:
-            futures = {pool.submit(_run_one, issue, analyst_kind, sheet, rules):
-                       issue["key"] for issue in claimed}
-            for future in as_completed(futures):
-                key = futures[future]
-                try:
-                    outcomes.append(future.result())
-                except Exception as exc:  # pragma: no cover - defensive
-                    LOG.error("queue.worker_failed", ticket=key, error=str(exc))
-                    outcomes.append({"ticket": key, "state": "ERROR",
-                                     "proposal_id": None, "reason": str(exc)})
-
-    summary = {"claimed": len(claimed), "skipped": skipped,
-               "outcomes": sorted(outcomes, key=lambda o: o["ticket"])}
-    LOG.info("queue.done", **{k: len(v) if isinstance(v, list) else v
-                              for k, v in summary.items()})
-    return summary
+    result = INTAKE.run(source=source, limit=limit, max_workers=max_workers,
+                        analyst_kind=analyst_kind, sheet_path=sheet_path)
+    result.raise_for_error()
+    return result.data["report"]
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -15,17 +15,17 @@ documentation of it.
 
 ## Build status
 
-Build order is Historian → Jira Leader → Chief of Staff → Slack Leader.
+Build order is Historian → Jira Leader → Chief of Staff.
 
 | Component | State |
 |---|---|
 | Historian (`agents/historian`, `corpus/`) | built — retrieval, duplicates, assignee ranking, SOP drafting |
 | Jira Leader (`agents/jira_leader`) | built — queue, 5 concurrent workers, batch assembly, execution hand-off |
 | Chief of Staff (`agents/chief_of_staff`) | built — morning brief, rule proposals, cost, error review |
-| Slack Leader (`agents/slack_leader`) | built — mentions: 3 concurrent thread workers, reply proposals, single write path with undo. Needs `SLACK_BOT_TOKEN` to run live |
 | Digital Twin (`agents/digital_twin`) | built — personal Chief of Staff: Work Profile, Task List, morning/EOD updates from allowed sources, drafts in the owner's voice, live-alert pilot. Read and draft only; never sends |
 
-Apollo and Henry have no integration at all, by design.
+Apollo and Henry have no integration at all, by design. Slack is not part of this
+repo: it is handled elsewhere.
 
 ---
 
@@ -107,23 +107,6 @@ into its context. Any failure falls back to the heuristic and flags the proposal
 
 ---
 
-## Slack mentions
-
-```bash
-make slack                      # offline, against tests/fixtures/mentions.json
-python3 -m agents.slack_leader.leader run --events events.json   # live
-python3 -m core.slack_execute run s_0003            # dry run
-python3 -m core.slack_execute run s_0003 --execute  # post, after approval
-python3 -m core.slack_execute undo <channel>:<ts> --execute
-```
-
-A mention becomes a reply *proposal*. Nothing posts without approval and an
-explicit `--execute`, because a Slack message can be deleted but not unread.
-Never-touch subjects get total silence — no reply, no acknowledgement.
-
-Needs the bot token (`xoxb-`), not the app-level token (`xapp-`): Slack answers
-`not_allowed_token_type` to the latter for every read and every post.
-
 ## The Digital Twin
 
 A personal Chief of Staff for the board owner, separate from the triage
@@ -173,11 +156,17 @@ exactly like an edit made in the batch file, so the learning loop sees it.
 
 ## Daily loop
 
+Everything recurring runs as flows of single-purpose agents, started by
+`com.pomelo.flows` (one launchd job, every minute): triage every 5 minutes,
+label decisions as they appear, status mirroring, research, corpus refresh,
+the 09:00 email, Monday rule proposals. `make flows` lists them;
+`make flows-status` shows how each last ran. What is left for you:
+
 ```bash
 make brief      # what is waiting for you, escalations, cost, errors
-make queue      # triage new tickets
-make batch      # assemble the approval batch
-make rules      # weekly: propose rules from the corrections log
+make batch      # assemble the approval batch (or label tickets in Jira)
+make execute    # dry run of approved proposals; EXEC=--execute to write
+make flow FLOW=intake   # run any flow by hand (dry run unless EXEC=--execute)
 ```
 
 Recommendations to action in Jira yourself (the system never deletes a ticket):
@@ -223,7 +212,7 @@ config/     boards.yml, never_touch.yml, repos.yml, .env.example
 core/       ledger.py proposals.py execute.py jira_client.py
             config.py log.py requester.py corrections.py miniyaml.py
 corpus/     export.py index.py (+ corpus.db, ledger.db — gitignored)
-agents/     historian/ jira_leader/ chief_of_staff/ slack_leader/ marketing_onsite/ digital_twin/
+agents/     historian/ jira_leader/ chief_of_staff/ marketing_onsite/ digital_twin/
 twin/       the Digital Twin's records — profile, tasks, drafts, cursors (gitignored)
 knowledge/  rules.md, corrections.jsonl, sops/
 review/     generated batches, briefs, rule proposals (gitignored)

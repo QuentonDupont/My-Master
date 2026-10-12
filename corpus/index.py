@@ -385,7 +385,13 @@ def build(clear: bool = True) -> dict:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     docs: list[dict] = []
     for path in sorted(RAW_DIR.glob("*.jsonl")):
-        for line in path.read_text(encoding="utf-8").splitlines():
+        # str.splitlines() breaks on far more than "\n" — it also treats
+        # U+2028/U+2029 and other Unicode line separators as line breaks. A
+        # ticket body pasted from Word or Confluence can carry one of those,
+        # which fractured its JSON record mid-string and stopped the whole
+        # rebuild. JSONL is newline-delimited by definition, so splitting on
+        # a literal "\n" is the correct read, not merely a safer one.
+        for line in path.read_text(encoding="utf-8").split("\n"):
             line = line.strip()
             if not line:
                 continue

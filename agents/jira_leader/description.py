@@ -146,7 +146,7 @@ def relevant_procedures(retrieval, text: str, limit: int = 2) -> list[dict]:
 
     A score alone cannot separate "New Retail Location V1" (0.38, exactly right)
     from "SG Store Visit - Engineers 28 Jun 2019" (0.43, matched deep in its
-    body). Shared here so a Slack reply and a clone description agree on what
+    body). Shared here so every drafted reply and clone description agree on what
     counts as the procedure.
     """
     from corpus.index import keywords as _keywords

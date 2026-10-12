@@ -22,7 +22,7 @@ layer does not move with it.
 The line is unchanged
 ---------------------
 `approve` and `reject` record decisions. `execute` is the only tool that writes
-to Jira or Slack, it defaults to a dry run, and it requires confirm=true to do
+to Jira, it defaults to a dry run, and it requires confirm=true to do
 anything. Nothing reaches a requester by accident.
 
 Authentication
@@ -57,8 +57,7 @@ def _board_status() -> dict:
     from core import ledger as ledger_mod
 
     with ledger_mod.Ledger() as led:
-        return {"jira": led.stats(),
-                "slack": ledger_mod.SlackLedger(led).stats()}
+        return {"jira": led.stats()}
 
 
 def _list_proposals(state: str = "PROPOSED") -> list[dict]:
@@ -136,11 +135,21 @@ def _status_drift() -> list[dict]:
     return status_mirror.drift(JiraReadClient())
 
 
+def _flows_status() -> dict:
+    import flows
+    from core import ledger as ledger_mod, scheduler
+
+    with ledger_mod.Ledger() as led:
+        waiting = len(led.by_state(ledger_mod.APPROVED, ledger_mod.CORRECTED))
+    return {"flows": scheduler.status(flows.registry()),
+            "awaiting_execute_confirm": waiting}
+
+
 TOOLS: dict[str, dict] = {
     "board_status": {
         "fn": lambda a: _board_status(),
-        "description": "Counts per ledger state for the Jira board and Slack "
-                       "threads. Start here to see whether anything needs you.",
+        "description": "Counts per ledger state for the Jira board. Start here "
+                       "to see whether anything needs you.",
         "schema": {"type": "object", "properties": {}},
     },
     "list_proposals": {
@@ -204,6 +213,14 @@ TOOLS: dict[str, dict] = {
                    "properties": {"proposal_id": {"type": "string"},
                                   "answer": {"type": "string"}},
                    "required": ["proposal_id", "answer"]},
+    },
+    "flows_status": {
+        "fn": lambda a: _flows_status(),
+        "description": "Each automated flow (intake, decisions, mirror, research, "
+                       "corpus, reports...): its trigger, last run, whether it "
+                       "failed, and how many approved proposals are waiting for "
+                       "you to confirm execute.",
+        "schema": {"type": "object", "properties": {}},
     },
     "status_drift": {
         "fn": lambda a: _status_drift(),

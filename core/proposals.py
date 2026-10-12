@@ -70,6 +70,13 @@ class Clone:
 
 
 @dataclass
+class RequesterEmailUpdate:
+    field_id: str
+    previous: str | None
+    value: str
+
+
+@dataclass
 class Proposal:
     proposal_id: str
     ticket: str
@@ -83,6 +90,7 @@ class Proposal:
     clone: Clone | None = None
     pesd1_transition: str | None = None
     flags: list[str] = field(default_factory=list)
+    requester_email_update: RequesterEmailUpdate | None = None
 
     # -- serialisation -----------------------------------------------------
     def to_dict(self) -> dict:
@@ -116,6 +124,8 @@ class Proposal:
             clone=Clone(**clone) if clone else None,
             pesd1_transition=data.get("pesd1_transition"),
             flags=list(data.get("flags") or []),
+            requester_email_update=RequesterEmailUpdate(**data["requester_email_update"])
+            if data.get("requester_email_update") else None,
         )
 
     @classmethod
@@ -192,6 +202,8 @@ def validate(data: dict) -> list[str]:  # noqa: C901 - a checklist, kept flat on
     clone = data.get("clone")
 
     if cls == ESCALATE:
+        if data.get("requester_email_update"):
+            p.append("ESCALATE must not update requester email")
         if comment.strip():
             p.append("ESCALATE must carry no proposed_comment (invariant 3)")
         if clone:
@@ -206,6 +218,14 @@ def validate(data: dict) -> list[str]:  # noqa: C901 - a checklist, kept flat on
         p.append(f"{cls} must not carry a clone")
     if cls in (ANSWERABLE, NEEDS_CODE) and not comment.strip():
         p.append(f"{cls} requires a proposed_comment")
+
+    # A comment must not cite a ticket outside PESD1/PRDT — the requester can't
+    # see it, and it leaks scope the way MUL/PRTR-751 did (corrections.jsonl,
+    # __rejected__, "the drafted comment cites MUL/PRTR-751 as a similar
+    # ticket").
+    for key in re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", comment):
+        if key.split("-")[0] not in allowed:
+            p.append(f"proposed_comment names {key}, outside the boards in scope")
 
     if clone:
         target = clone.get("target_project")
@@ -242,6 +262,22 @@ def validate(data: dict) -> list[str]:  # noqa: C901 - a checklist, kept flat on
 
     if not isinstance(data.get("flags"), list):
         p.append("flags must be a list")
+
+    update = data.get("requester_email_update")
+    if update:
+        expected = config.boards()["intake"].get("requester_email_field")
+        if not expected or update.get("field_id") != expected:
+            p.append("requester email update must use the configured field")
+        if requester.get("source") != "sheet" or requester.get("confidence") != "high":
+            p.append("requester email update requires an exact sheet match")
+        if not requester.get("matched_row"):
+            p.append("requester email update requires sheet evidence")
+        if update.get("value") != requester.get("email"):
+            p.append("requester email update disagrees with matched email")
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", str(update.get("value", ""))):
+            p.append("requester email update is not a valid email")
+        if update.get("previous") not in (None, ""):
+            p.append("requester email update must not overwrite an existing value")
 
     for secret in config.known_secrets():
         if secret and len(secret) >= 8 and (secret in comment or secret in json.dumps(clone or {})):
@@ -304,14 +340,30 @@ def load_all() -> list[Proposal]:
 
 # -- correction diffing ----------------------------------------------------
 def diff(before: dict, after: dict, prefix: str = "") -> list[tuple[str, Any, Any]]:
-    """Flat field-path diff used to write knowledge/corrections.jsonl."""
+    """Flat field-path diff used to write knowledge/corrections.jsonl.
+
+    Recurses whenever EITHER side is a dict, not only when both are — a clone
+    dropping to None (a NEEDS_CODE -> ANSWERABLE reclassification) used to
+    diff as one opaque `clone` entry instead of `clone.assignee`,
+    `clone.summary`, etc. individually. That silently blinded
+    agents/chief_of_staff/rules.py's routing-rule clustering, which keys
+    specifically on `clone.assignee`: real data had 7 `clone` corrections and
+    zero `clone.assignee` ones from this path, all 7 coinciding with a
+    classification change. The classification flip is still (correctly)
+    clustered separately; rules.py guards against a None `was`/`became` pair
+    so this doesn't turn into "Route these to **None**" nonsense.
+    """
     changes: list[tuple[str, Any, Any]] = []
     keys = sorted(set(before) | set(after))
     for key in keys:
         path = f"{prefix}{key}"
         b, a = before.get(key), after.get(key)
-        if isinstance(b, dict) and isinstance(a, dict):
-            changes.extend(diff(b, a, prefix=f"{path}."))
+        b_dict, a_dict = isinstance(b, dict), isinstance(a, dict)
+        if b_dict or a_dict:
+            if b == a:
+                continue
+            changes.extend(diff(b if b_dict else {}, a if a_dict else {},
+                                prefix=f"{path}."))
         elif b != a:
             changes.append((path, b, a))
     return changes

@@ -80,11 +80,12 @@ def _column(rows: list[dict], *hints: str, exclude: tuple[str, ...] = ()) -> str
 
 
 def _email_in_row(row: dict) -> str | None:
-    for value in row.values():
-        m = EMAIL_RE.search(str(value or ""))
-        if m:
-            return m.group(0)
-    return None
+    # Use the identity column, never an email mentioned in the request body.
+    col = _column([row], "requester_email", "email_address", "email", "e-mail")
+    values = [row.get(col)] if col else row.values()
+    emails = {m.group(0).lower() for value in values
+              for m in EMAIL_RE.finditer(str(value or ""))}
+    return next(iter(emails)) if len(emails) == 1 else None
 
 
 def _parse_ts(value: str) -> dt.datetime | None:
@@ -160,19 +161,17 @@ def resolve(issue: dict, sheet: list[dict] | None = None) -> RequesterMatch:
         return RequesterMatch(None, "unknown", "unknown", {}, ["requester_unknown"])
 
     # Rule 2 — exact join on a column carrying the ticket key.
-    for row in sheet:
-        for col, value in row.items():
-            if not value:
-                continue
-            if key in KEY_RE.findall(str(value).upper()):
-                email = _email_in_row(row)
-                if email:
-                    LOG.info("requester.sheet_join", ticket=key, column=col)
-                    return RequesterMatch(email, "sheet", "high", row, [])
-                LOG.warn("requester.sheet_join_no_email", ticket=key)
-                return RequesterMatch(None, "unknown", "unknown", row,
-                                      ["requester_unknown",
-                                       "sheet row matched the key but has no email"])
+    key_col = _column(sheet, "jira_ticket", "ticket_key", "jira_key", "ticket_id",
+                      "jira_link", "ticket", "jira")
+    joined = [row for row in sheet
+              if key in KEY_RE.findall(str(row.get(key_col) or "").upper())] if key_col else []
+    if joined:
+        emails = {_email_in_row(row) for row in joined}
+        if len(emails) == 1 and None not in emails:
+            LOG.info("requester.sheet_join", ticket=key, column=key_col)
+            return RequesterMatch(next(iter(emails)), "sheet", "high", joined[0], [])
+        return RequesterMatch(None, "unknown", "unknown", {"rows": joined},
+                              ["requester_unknown", "requester_ambiguous"])
 
     # Rule 3 — name AND timestamp AND text must all agree.
     reporter = ((fields.get("reporter") or {}) or {}).get("displayName") or ""
@@ -187,6 +186,7 @@ def resolve(issue: dict, sheet: list[dict] | None = None) -> RequesterMatch:
                        exclude=tuple(c for c in (email_col, name_col, ts_col) if c))
 
     best: tuple[float, dict, dict] | None = None
+    candidate_emails: set[str] = set()
     for row in sheet:
         email = _email_in_row(row)
         if not email:
@@ -199,12 +199,16 @@ def resolve(issue: dict, sheet: list[dict] | None = None) -> RequesterMatch:
         )
         t = text_similarity(body, row.get(text_col, "") if text_col else "")
         if n >= NAME_RATIO and in_window and t >= TEXT_SIMILARITY:
+            candidate_emails.add(email)
             score = n + t
             evidence = {"name_ratio": round(n, 3), "text_similarity": round(t, 3),
                         "submitted": str(submitted), "ticket_created": str(created)}
             if best is None or score > best[0]:
                 best = (score, row, evidence)
 
+    if len(candidate_emails) > 1:
+        return RequesterMatch(None, "unknown", "unknown", {},
+                              ["requester_unknown", "requester_ambiguous"])
     if best:
         _, row, evidence = best
         matched = dict(row)

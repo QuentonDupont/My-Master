@@ -140,31 +140,41 @@ def apply(reader, writer, led: ledger_mod.Ledger | None = None,
     own = led is None
     led = led or ledger_mod.Ledger()
     try:
-        done = []
-        for item in drift(reader, led):
-            if item["action"] != "mirror":
-                continue
-            parent, target = item["parent"], item["target"]
-            available = {t["to"]["name"]: t["name"]
-                         for t in reader.transitions(parent)}
-            if target not in available:
-                item["action"] = "report"
-                item["why"] = (f"{parent} cannot reach {target!r} from "
-                               f"{item['parent_status']!r}; offered: "
-                               f"{sorted(available)}")
-                done.append(item)
-                continue
-            item["from_status"] = item["parent_status"]
-            if execute:
-                writer.transition(parent, target)
-                LOG.info("mirror.moved", parent=parent, clone=item["clone"],
-                         **{"from": item["parent_status"], "to": target})
-            item["executed"] = bool(execute)
-            done.append(item)
-        return done
+        return apply_items(drift(reader, led), reader, writer, led, execute=execute)
     finally:
         if own:
             led.close()
+
+
+def apply_items(items: list[dict], reader, writer, led: ledger_mod.Ledger,
+                execute: bool = False) -> list[dict]:
+    """Move the parents `drift()` marked "mirror". Each executed move is
+    journalled against the parent with the status it came from."""
+    done = []
+    for item in items:
+        if item["action"] != "mirror":
+            continue
+        parent, target = item["parent"], item["target"]
+        available = {t["to"]["name"]: t["name"]
+                     for t in reader.transitions(parent)}
+        if target not in available:
+            item["action"] = "report"
+            item["why"] = (f"{parent} cannot reach {target!r} from "
+                           f"{item['parent_status']!r}; offered: "
+                           f"{sorted(available)}")
+            done.append(item)
+            continue
+        item["from_status"] = item["parent_status"]
+        if execute:
+            writer.transition(parent, target)
+            led.journal(parent, None, "mirror_transition", True,
+                        {"from": item["parent_status"], "to": target,
+                         "clone": item["clone"]})
+            LOG.info("mirror.moved", parent=parent, clone=item["clone"],
+                     **{"from": item["parent_status"], "to": target})
+        item["executed"] = bool(execute)
+        done.append(item)
+    return done
 
 
 def main(argv: list[str] | None = None) -> int:
