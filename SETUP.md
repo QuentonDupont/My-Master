@@ -79,7 +79,7 @@ list` prints it.
 | corpus / confluence | every 2h / Mon 07:00 | refresh the Historian's index | `flows/corpus.py` |
 | content | on `content_task.added`, hourly | draft Apollo content plans, staged inactive | `flows/content.py` |
 | escalation | human (an answer) | turn the board owner's answer into a proposal | `flows/escalation.py` |
-| daily-report / rules | 09:00 / Mon 08:30 | status email / rule proposals | `flows/report.py` |
+| daily-report / rules | 09:00 / Mon 08:30 | status report to `review/daily_reports/<date>.md` (emailed only if Gmail is configured) / rule proposals | `flows/report.py` |
 | housekeeping | hourly | cap logs, prune run history | `flows/housekeeping.py` |
 
 The packages under `agents/` are the libraries those agents call.
@@ -103,7 +103,7 @@ connects *in* except the optional MCP connector.
 | **Confluence** (same site, `/wiki/api/v2`) | `core/confluence_client.py`, same login | same Jira token | **Read only**, no write path exists | Historian's best evidence (SOPs weigh more than ticket history). Spaces in `config/confluence.yml` |
 | **GitHub** (`api.github.com`, org `pomelofashion`) | commit/PR search by ticket key | `GITHUB_TOKEN` | Read only | Links a ticket to the change that fixed it. Optional |
 | **Anthropic API** | `agents/jira_leader/analysis.py` | `ANTHROPIC_API_KEY`, `ANALYST_MODEL` | Outbound prompts | Optional. **Unset = workers use a deterministic keyword heuristic.** The biggest single quality lever |
-| **Gmail SMTP** | `core/mailer.py`; OAuth2 via `oauth2.googleapis.com` (`tools/gmail_oauth_setup.py`) or app password | `GMAIL_OAUTH_*` or `REPORT_EMAIL_APP_PASSWORD`, `REPORT_EMAIL_FROM/TO` | Sends the daily report only | 09:00 daily status email. Optional |
+| **Gmail SMTP** | `core/mailer.py`; OAuth2 via `oauth2.googleapis.com` (`tools/gmail_oauth_setup.py`) or app password | `GMAIL_OAUTH_*` or `REPORT_EMAIL_APP_PASSWORD`, `REPORT_EMAIL_FROM/TO` | Sends the daily report only | Optional and off by choice since 12 Oct 2026: the report is saved to a file; set Gmail credentials to also email it |
 | **Requester intake sheet** | A **CSV export**, no Google API | `REQUESTER_SHEET_CSV` (default `corpus/raw/intake_sheet.csv`) | Read | Matching a ticket to its requester. Optional |
 | **Claude app (phone)** | MCP server, `tools/mcp_server.py`, JSON-RPC over HTTP | `MCP_AUTH_TOKEN` (server refuses to start without it) | Inbound. Needs a **public URL** (Anthropic calls it from their servers): Tailscale Funnel or a Cloudflare tunnel | Approving from the phone. Optional |
 | **claude.ai review page** | `tools/review_app.html` published as a private Artifact | none in the repo | Records approve/reject, has no Jira credentials | Optional phone review UI. **Lives on claude.ai, not in git** |

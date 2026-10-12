@@ -2,11 +2,14 @@
 proposes to learn.
 
 daily-report  daily at 09:00
-    check_health -> build_brief -> assemble_report -> render_report -> send_report
+    check_health -> build_brief -> assemble_report -> render_report ->
+    save_report -> send_report
 
     Health of every flow and job, the queue waiting on the board owner, what was
-    executed yesterday, the Marketing & Onsite queue, and errors. Emailed when
-    scheduled (live_when_scheduled); a manual run prints it unless --execute.
+    executed yesterday, the Marketing & Onsite queue, and errors. Saved to
+    review/daily_reports/<date>.md every run. Emailed as well only when Gmail
+    sending is configured in .env — since 12 Oct 2026 it is not, by choice, and
+    send_report skips rather than fails.
 
 rules         Mondays at 08:30
     cluster_corrections -> write_rule_proposals
@@ -56,11 +59,28 @@ def render_report(ctx):
     ctx["report"] = daily_report.render(ctx["report_data"])
 
 
+@agent("save_report", LOCAL)
+def save_report(ctx):
+    """Write the report to review/daily_reports/<date>.md — where it is read."""
+    from core import config
+
+    out = config.REVIEW_DIR / "daily_reports"
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"{dt.date.today().isoformat()}.md"
+    path.write_text(ctx["report"] + "\n", encoding="utf-8")
+    ctx["saved"] = str(path)
+
+
 @agent("send_report", EMAIL)
 def send_report(ctx):
-    """Email the report (dry run unless executing)."""
+    """Email the report too, only if Gmail sending is configured."""
     from core import mailer
 
+    if not mailer.configured():
+        # The board owner chose a file over an email (12 Oct 2026). Without
+        # Gmail credentials this is a deliberate skip, not a failure.
+        ctx["sent"] = {"skipped": "email not configured; report saved to file"}
+        return
     subject = f"Pomelo triage — daily status, {dt.date.today().isoformat()}"
     ctx["sent"] = mailer.send(subject, ctx["report"], to=ctx.get("to") or "",
                               dry_run=not ctx.execute)
@@ -68,9 +88,10 @@ def send_report(ctx):
 
 DAILY_REPORT = Flow(
     "daily-report",
-    [check_health, build_brief, assemble_report, render_report, send_report],
+    [check_health, build_brief, assemble_report, render_report, save_report,
+     send_report],
     triggers=[Daily("09:00")],
-    doc="Morning status email: health, queue, yesterday, content, errors.",
+    doc="Morning status report to review/daily_reports/ (emailed only if Gmail is set up).",
     live_when_scheduled=True,
     timeout_seconds=900,
 )
