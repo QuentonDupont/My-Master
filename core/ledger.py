@@ -89,6 +89,18 @@ CREATE TABLE IF NOT EXISTS execution_log (
   detail       TEXT
 );
 CREATE INDEX IF NOT EXISTS execution_log_ticket_idx ON execution_log(ticket_key);
+
+-- Append-only event journal. Every state change writes one row in the same
+-- transaction as the change, so flows triggered On(event) never miss one and
+-- never see one that was rolled back. Read through core.events.
+CREATE TABLE IF NOT EXISTS events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts          TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  ticket_key  TEXT,
+  data        TEXT
+);
+CREATE INDEX IF NOT EXISTS events_name_idx ON events(name);
 """
 
 _UPDATABLE = {"content_hash", "proposal_id", "clone_key", "comment_id", "last_error"}
@@ -100,6 +112,14 @@ class LedgerError(RuntimeError):
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def emit_in(conn: sqlite3.Connection, name: str, ticket_key: str | None = None,
+            **data) -> None:
+    """Append one event inside the caller's open transaction."""
+    conn.execute("INSERT INTO events (ts, name, ticket_key, data) VALUES (?, ?, ?, ?)",
+                 (now(), name, ticket_key,
+                  json.dumps(data, default=str) if data else None))
 
 
 def content_hash(summary: str, description: str, comment_count: int) -> str:
@@ -250,6 +270,7 @@ class Ledger:
                        VALUES (?, ?, ?, ?, ?, 1)""",
                     (ticket_key, CLAIMED, now(), now(), hash_),
                 )
+                emit_in(conn, "ticket.claimed", ticket_key, previous=None)
                 LOG.info("ledger.claimed", ticket=ticket_key, previous=None)
                 return True
             state = row["state"]
@@ -263,6 +284,7 @@ class Ledger:
                 (CLAIMED, now(), hash_, ticket_key, state),
             )
             changed = conn.total_changes
+            emit_in(conn, "ticket.claimed", ticket_key, previous=state)
         LOG.info("ledger.claimed", ticket=ticket_key, previous=state)
         return bool(changed)
 
@@ -292,6 +314,8 @@ class Ledger:
                 values.append(value)
             values.append(ticket_key)
             conn.execute(f"UPDATE ledger SET {', '.join(sets)} WHERE ticket_key = ?", values)
+            emit_in(conn, f"ticket.{to_state.lower()}", ticket_key, previous=frm,
+                    proposal_id=fields.get("proposal_id") or row["proposal_id"])
         LOG.info("ledger.transition", ticket=ticket_key, **{"from": frm, "to": to_state})
         return self.get(ticket_key)  # type: ignore[return-value]
 

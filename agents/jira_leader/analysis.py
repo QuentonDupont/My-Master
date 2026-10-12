@@ -427,11 +427,14 @@ def get_analyst(kind: str = "auto"):
         return HeuristicAnalyst()
     if kind == "claude":
         if not ClaudeAnalyst.available():
+            missing = []
+            if not config.env("ANTHROPIC_API_KEY"):
+                missing.append("ANTHROPIC_API_KEY is not set in .env")
             try:
                 import anthropic  # noqa: F401
-                why = "ANTHROPIC_API_KEY is not set in .env"
             except ImportError:
-                why = "the anthropic package is not installed"
+                missing.append("the anthropic package is not installed")
+            why = " and ".join(missing) or "the Claude analyst is unavailable"
             raise AnalystUnavailable(
                 f"--analyst claude was asked for but {why}. Use --analyst auto "
                 "to fall back to the heuristic on purpose.")
