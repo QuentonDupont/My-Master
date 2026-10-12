@@ -40,6 +40,35 @@ RESOLVED_HINTS = ("done", "closed", "resolved", "complete", "cancelled", "declin
 #: PRDT summaries start with a component tag: "[HEN] ...", "[NET] ...".
 TAG_RE = re.compile(r"^\s*[\[(]([^\])]{2,20})[\])]")
 
+#: A record number or code specific enough that two tickets naming different
+#: ones cannot be the same ticket, however alike the wording around it reads
+#: -- RMA1432395, S_NCG0147, PO4471, IR:3168727, PRDT-11792. Letters, then a
+#: run of 4+ digits, then whatever code punctuation follows.
+_CODE_RE = re.compile(r"\b[A-Za-z_]{0,8}\d{4,}[A-Za-z0-9_$.-]*\b")
+#: A dotted or $-joined identifier of 3+ segments -- the shape of a Java/
+#: Kotlin crash signature (com.mobile.pomelo...Fragment$composeView$1.invoke).
+#: Two alerts naming different ones are different crashes, full stop, even
+#: when Crashlytics' own template makes every summary read the same.
+_DOTTED_RE = re.compile(r"\b(?:[A-Za-z_][\w$]*[.$]){2,}[A-Za-z_][\w$]*\b")
+
+
+def distinguishing_ids(text: str) -> set[str]:
+    """Record numbers, SKU/RMA/PO-style codes and crash-signature-shaped
+    identifiers found in `text`, uppercased so RMA1432395 and rma1432395
+    compare equal.
+
+    Built 12 Oct 2026 after duplicate detection, which otherwise scores on
+    overall text similarity alone, matched two formulaic-but-distinct
+    tickets to each other twice in one day: PESD1-11337 to PESD1-11298
+    (two different Crashlytics alerts) and PESD1-11333 to PESD1-11334 (two
+    different NCG item codes). A fixed route can route around this for one
+    named ticket family at a time; this is the general fix.
+    """
+    text = text or ""
+    ids = {m.group(0).upper() for m in _CODE_RE.finditer(text)}
+    ids |= {m.group(0) for m in _DOTTED_RE.finditer(text)}
+    return ids
+
 
 @dataclass
 class Retrieval:
@@ -117,14 +146,32 @@ class Historian:
 
     def duplicates(self, text: str, *, exclude_ref: str | None = None,
                    limit: int = 5, threshold: float = DUPLICATE_THRESHOLD) -> list[dict]:
-        """Similar tickets that are still OPEN on the intake board."""
+        """Similar tickets that are still OPEN on the intake board.
+
+        A candidate naming a different record than this ticket does --
+        a different RMA, a different SKU code, a different crash signature
+        -- is dropped here, however high its text similarity: see
+        `distinguishing_ids`. Wording alone never outranks a named record.
+        """
         open_statuses = tuple(config.boards()["intake"]["open_statuses"])
         hits = self.corpus.search(
             text, limit=limit * 3, source_types=("jira",),
             project=config.intake_project(), statuses=open_statuses,
             exclude_refs=(exclude_ref,) if exclude_ref else (),
         )
-        out = [h for h in hits if h.get("similarity", 0) >= threshold][:limit]
+        query_ids = distinguishing_ids(text)
+        out = []
+        for doc in hits:
+            if doc.get("similarity", 0) < threshold:
+                continue
+            doc_ids = distinguishing_ids(f"{doc.get('title', '')} {doc.get('body', '')}")
+            if query_ids and doc_ids and query_ids.isdisjoint(doc_ids):
+                LOG.info("historian.duplicate_id_mismatch", candidate=doc.get("ref"),
+                         query_ids=sorted(query_ids)[:5], doc_ids=sorted(doc_ids)[:5])
+                continue
+            out.append(doc)
+            if len(out) >= limit:
+                break
         for doc in out:
             doc["open_clones"] = self.open_clones(doc)
         return out
