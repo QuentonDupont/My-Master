@@ -1,0 +1,103 @@
+"""The ops flows: corpus, daily report, rules, housekeeping."""
+from __future__ import annotations
+
+import datetime as dt
+import unittest
+from unittest.mock import patch
+
+from core import config, scheduler
+from core.flow import Context
+from flows.corpus import CORPUS
+from flows.housekeeping import HOUSEKEEPING
+from flows.report import DAILY_REPORT, RULES
+from tests.helpers import fixture_boards, sandbox
+
+
+class DailyReportTests(unittest.TestCase):
+    def test_manual_run_renders_and_does_not_send(self):
+        with sandbox(), fixture_boards(), \
+                patch("agents.chief_of_staff.health.launchd", return_value={}):
+            res = DAILY_REPORT.run(Context("daily-report"))
+            self.assertTrue(res.ok, res.error)
+            self.assertIn("HEALTH", res.data["report"])
+            self.assertTrue(res.data["sent"]["dry_run"])
+
+    def test_scheduled_run_sends_and_a_mail_failure_fails_the_flow(self):
+        from core.mailer import MailerNotConfigured
+
+        with sandbox(), fixture_boards(), \
+                patch("agents.chief_of_staff.health.launchd", return_value={}), \
+                patch("core.mailer.send", side_effect=MailerNotConfigured("no auth")) as send:
+            res = scheduler.run_flow(DAILY_REPORT, trigger="schedule")
+            self.assertFalse(res.ok)
+            self.assertIn("send_report", res.error)
+            self.assertFalse(send.call_args.kwargs["dry_run"])
+            self.assertIn("HEALTH", res.data["report"])     # the report itself was built
+
+    def test_report_shows_flow_health(self):
+        from agents.chief_of_staff import health
+
+        with sandbox(), fixture_boards():
+            fl = health.flows()
+            self.assertTrue(fl["intake"]["overdue"])         # never ran
+            self.assertNotIn("execute", fl)                  # human-only: no schedule
+            scheduler.run_flow(HOUSEKEEPING)
+            self.assertFalse(health.flows()["housekeeping"]["overdue"])
+
+
+class CorpusTests(unittest.TestCase):
+    def test_one_export_failing_still_reindexes(self):
+        def export(project, **kw):
+            if project == "PESD1":
+                raise RuntimeError("jira down")
+            return 7
+
+        with sandbox(), fixture_boards(), \
+                patch("corpus.export.export_jira", side_effect=export) as ex, \
+                patch("corpus.index.build", return_value={"documents": 1}) as build:
+            res = CORPUS.run()
+            self.assertFalse(res.ok)                         # reported, not hidden
+            self.assertEqual(res.errors, ["export_pesd1: jira down"])
+            build.assert_called_once()
+            self.assertEqual(res.data["report"]["exported_PRDT"], 7)
+            self.assertTrue(all(c.kwargs["merge"] for c in ex.call_args_list))
+
+
+class RulesTests(unittest.TestCase):
+    def test_no_corrections_writes_nothing(self):
+        with sandbox():
+            res = RULES.run()
+            self.assertEqual(res.data["report"], "no rule proposals this week")
+            self.assertEqual(list(config.REVIEW_DIR.glob("rule_proposals_*")), [])
+
+
+class HousekeepingTests(unittest.TestCase):
+    def test_truncates_big_logs_including_flow_output(self):
+        with sandbox():
+            big = config.LOG_DIR / "flows" / "intake.out"
+            big.parent.mkdir(parents=True)
+            big.write_bytes(b"a" * 50 + b"TAIL")
+            small = config.LOG_DIR / "x.jsonl"
+            small.write_text("{}\n")
+            res = HOUSEKEEPING.run(max_bytes=20, keep_bytes=4)
+            self.assertEqual(big.read_bytes(), b"TAIL")
+            self.assertEqual(small.read_text(), "{}\n")
+            self.assertIn("flows/intake.out",
+                          [t["file"] for t in res.data["report"]["truncated"]])
+
+    def test_prunes_old_runs_only(self):
+        with sandbox():
+            with scheduler.Store() as store:
+                old = store.start_run("intake", "schedule")
+                store.conn.execute("UPDATE flow_runs SET started = ? WHERE id = ?",
+                                   ((dt.datetime.now(dt.timezone.utc)
+                                     - dt.timedelta(days=30)).isoformat(), old))
+                store.start_run("intake", "schedule")
+            res = HOUSEKEEPING.run()
+            self.assertEqual(res.data["report"]["runs_pruned"], 1)
+            with scheduler.Store() as store:
+                self.assertEqual(len(store.runs("intake")), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

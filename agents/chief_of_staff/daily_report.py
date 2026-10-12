@@ -59,9 +59,12 @@ def _content_tasks_since(since: dt.datetime) -> list:
 
 
 def gather() -> dict:
+    return assemble(brief_mod.brief(), health_mod.check_all())
+
+
+def assemble(b: dict, h: dict) -> dict:
+    """The report's data from an already-built brief and health check."""
     since, now = _yesterday_window()
-    b = brief_mod.brief()
-    h = health_mod.check_all()
 
     executed_24h = _executed_since(since)
     content_24h = _content_tasks_since(since)
@@ -144,6 +147,17 @@ def render(data: dict) -> str:
     out.append("")
     out.append("INFRA  " + ("all launchd jobs answering"
                             if not down else f"NOT RUNNING: {', '.join(down)}"))
+    fl = data["health"].get("flows") or {}
+    if "error" in fl:
+        out.append(f"FLOWS  could not read flow history: {fl['error']}")
+    elif fl:
+        late = [n for n, s in fl.items() if s["overdue"]]
+        failing = [n for n, s in fl.items() if s["last_failed"]]
+        out.append("FLOWS  " + ("every scheduled flow ran on time"
+                                if not (late or failing) else
+                                "; ".join(filter(None, [
+                                    late and f"OVERDUE: {', '.join(late)}",
+                                    failing and f"LAST RUN FAILED: {', '.join(failing)}"]))))
     out.append("")
 
     # -- yesterday ------------------------------------------------------

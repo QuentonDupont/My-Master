@@ -21,7 +21,11 @@ LOG = log.get("chief_of_staff")
 #: launchd job died silently, not that it is just quiet.
 STALE_AFTER = dt.timedelta(hours=2)
 
-LAUNCHD_JOBS = ("com.pomelo.mcp", "com.pomelo.daily_report")
+LAUNCHD_JOBS = ("com.pomelo.flows", "com.pomelo.mcp")
+
+#: A scheduled flow is overdue when its last successful run is older than this
+#: many of its own intervals (Daily flows: older than this many days).
+OVERDUE_INTERVALS = 3
 
 
 def _now() -> dt.datetime:
@@ -131,10 +135,39 @@ def marketing_onsite() -> dict:
     return {"by_state": by_state, "total": len(all_tasks)}
 
 
+def flows() -> dict:
+    """Each scheduled flow: last run, last success, and whether it is overdue."""
+    try:
+        import flows as flows_pkg
+        from core import scheduler
+        from core.flow import Daily, Every
+
+        reg = flows_pkg.registry()
+        out = {}
+        for st in scheduler.status(reg):
+            f = reg[st["flow"]]
+            periods = [t.seconds for t in f.triggers if isinstance(t, Every)]
+            periods += [86400 for t in f.triggers if isinstance(t, Daily)]
+            if not periods:
+                continue  # human-confirmed: there is no schedule to miss
+            limit = dt.timedelta(seconds=min(periods) * OVERDUE_INTERVALS)
+            last_ok = (dt.datetime.fromisoformat(st["last_ok"]).replace(tzinfo=None)
+                       if st["last_ok"] else None)
+            out[f.name] = {
+                "last_ok": st["last_ok"],
+                "last_failed": bool(st["last_run"] and st["last_run"]["ok"] is False),
+                "overdue": last_ok is None or _now() - last_ok > limit,
+            }
+        return out
+    except Exception as exc:  # pragma: no cover - reported, never raised
+        return {"error": str(exc)[:200]}
+
+
 def check_all() -> dict:
     return {
         "generated": _now().isoformat(timespec="minutes") + "Z",
         "launchd": launchd(),
+        "flows": flows(),
         "jira_leader": jira_leader(),
         "historian": historian(),
         "chief_of_staff": chief_of_staff(),
