@@ -34,6 +34,17 @@ with a trigger (CLAUDE.md > Architecture). On the branch, not yet live:
   others with nothing to do with data engineering, and only one real
   precedent (11332) exists so far. Not enough signal to write a safe rule;
   said so rather than forcing one.
+* **The retriage flow's first live use immediately found a second instance
+  of the duplicate-detection bug it was meant to fix only for Crashlytics.**
+  Retriaging PESD1-11333 with the new NCG assignee override live-flagged it
+  as a duplicate of PESD1-11334 — a different NCG code, matched purely on
+  near-identical templated wording. Both tickets were corrected directly
+  (same NCG routing, not a duplicate). This is now fixed generally, not
+  per-ticket-family: `Historian.duplicates()` drops a candidate whose
+  record number, SKU code or crash signature differs from the query's
+  (`distinguishing_ids`, `agents/historian/retrieval.py`), so wording alone
+  can no longer outrank a named, differing record. SKILL.md's gates section
+  has the general lesson for the next formulaic ticket type this misses.
 * New behaviour: `rules` now actually runs weekly (Mon 08:30, proposals only);
   `confluence` refreshes weekly (Mon 07:00, read-only); research runs every
   15m instead of every 5m; mirror moves are journalled in `execution_log`.

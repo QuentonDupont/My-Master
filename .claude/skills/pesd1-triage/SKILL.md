@@ -85,6 +85,18 @@ All writes in step 7 still go through the human's approval first
    with `JiraWriteClient(execute=True)`, never folded into the autonomous
    loop. Say this plainly before doing it, and only do it once the human has
    actually said to.
+4. **A formulaic ticket type is a duplicate-detection trap.** Any family with
+   a repeated template — Crashlytics alerts, NCG item requests, anything a
+   form or integration generates — reads as near-100% textually similar to
+   every other ticket of the same shape, so wording alone will eventually
+   match two genuinely different ones to each other (it did, twice, on
+   12 Oct 2026: PESD1-11337/11298, two different crashes; PESD1-11333/11334,
+   two different NCG codes). `Historian.duplicates()` now drops a match
+   whose record number, SKU code or crash signature differs from the
+   current ticket's (`distinguishing_ids` in `agents/historian/retrieval.py`)
+   — but that is a floor, not a guarantee for every future shape. When a
+   proposed duplicate link looks too easy for a ticket type this templated,
+   read both tickets' own identifying numbers before trusting it.
 
 ## Posting code or SQL in a Jira comment
 
