@@ -200,6 +200,82 @@ NetSuite, then a refund is "submitted" and a credit slip generated. The
 a return to Received by hand** (e.g. PESD1-11279) as never-touch (refunds).
 A plain re-sync of a return that is already Received in NetSuite is fine.
 
+### The actual queries, so "check NetSuite and Apollo" is not a vague gesture
+
+**Apollo** is a MySQL-backed app, so a real `SELECT`/`DELETE` can be drafted
+and handed to whoever has DB access (Quenton, or an engineer over SSH —
+invariant 2 means the *system* never runs these itself, only drafts them for
+a human, exactly as Quenton posted the DELETE SQL himself on PESD1-11305).
+
+```sql
+-- LOOKUP: one or more returns by id (the RMA number, no "RMA" prefix)
+SELECT * FROM pml_order_return WHERE id_order_return IN (<id>, <id>, ...);
+SELECT * FROM pml_order_return_detail WHERE id_order_return IN (<id>, ...);
+SELECT * FROM pml_order_return_history WHERE id_order_return IN (<id>, ...);
+```
+
+```sql
+-- DELETE: a return that should not exist (confirmed first, never guessed —
+-- see the never-touch note below). Order matters: history and detail are
+-- children of the return row (PESD1-11281, 11305 both ran it in this order).
+DELETE FROM pml_order_return_history WHERE id_order_return = <id>;
+DELETE FROM pml_order_return_detail WHERE id_order_return = <id>;
+DELETE FROM pml_order_return WHERE id_order_return = <id>;
+```
+
+There is no verified **ADD**/insert query for this table — no precedent has
+ever needed one, and guessing the required columns on a commerce table that
+feeds NetSuite and refunds is how you create a return nobody can act on.
+Treat a "recreate the return record" ask as its own, slower investigation,
+not a one-line INSERT.
+
+**Column names beyond `id_order_return` are not verified against the live
+schema** — the `SELECT *` form above is deliberate: it shows every column
+there is, rather than guessing at a `sync_status` or `received_at` name that
+might not exist. Confirm columns against one real row before writing a
+narrower query.
+
+**NetSuite has no query access at all**, verified or otherwise — see
+"Platform connections" below. "Check NetSuite" means the **Lookup** steps:
+Global Search the RMA number, open the Return Authorization, and read
+whether a Credit Memo or Item Receipt is already linked. There is no SQL,
+SuiteQL or saved-search substitute available to this system today.
+
+**Never-touch applies to the confirmation step too.** A DELETE is only ever
+drafted after the ticket (or Quenton) has independently confirmed the record
+is wrong — "the requester said so" is not confirmation on a table that
+touches refunds. If that confirmation hasn't happened, the fix brief says
+"not confirmed as erroneous" and stops there.
+
+## Return wrongly auto-closed after a marketplace cancellation (reopen)
+
+*Looks like:* "please reopen RMA/change status from Closed to Pending
+Receipt", after a marketplace order (Shopee/Lazada/TikTok) was cancelled
+**after** it had already shipped. The platform's own cancel flow then
+auto-creates, auto-receives and auto-closes an RMA nobody asked for — the
+parcel is still in transit and the warehouse has nothing to receive against
+on arrival. First seen as a batch of 7 on PESD1-11319, 5 Oct 2026.
+
+**This is refund-adjacent, not a plain data-entry fix — escalate, don't
+execute.** Reopening means deleting the NetSuite Item Receipt, and by the
+time Ops notices, a Credit Memo or refund may already be linked to it.
+Touching either without Finance's say is invariant-3 territory even though
+no never-touch keyword fires on the ticket text itself.
+
+**Lookup, per RMA** (NetSuite, manual — no query access): open the Return
+Authorization, and read whether an Item Receipt, Credit Memo or Refund is
+linked. **Fix, only after Finance approves:** delete the Item Receipt only —
+never the Credit Memo or Refund without a separate Finance decision — so the
+RMA reads Pending Receipt again and the warehouse can receive the real
+parcel. No precedent exists for reopening an already-received-and-closed RMA
+specifically (distinct from PESD1-10081/PRDT-10406, which deleted a receipt
+on a Transfer Order, not an RMA).
+
+**Recurs, and is worth its own fix:** the root cause — MP-cancel-after-ship
+auto-creating a return — is a real bug independent of any one ticket. Worth
+raising as its own NEEDS_CODE ticket against the integration rather than
+reopening RMAs by hand every time it happens.
+
 ---
 
 ## Platform connections
@@ -212,18 +288,24 @@ What we can check a ticket against, and from where. Read-only, always.
 | Confluence (OP, PSD, PM, NEON, MUL, TSD, NIM) | SOPs | yes: Atlassian connector |
 | Slack | fixes agreed in threads | yes: Slack connector (read; drafts only after approval) |
 | Google Drive | ticket attachments, intake sheet | yes: Drive connector |
-| **Superset MCP** `superset-mcp-th.pmlo.co/mcp` (Redshift: returns, inventory, TOs, NS-vs-ERPLY) | live record state: the best check-up source | **no.** The host is not in the network allowlist and there's no token in the env secrets. Works in Claude Desktop (Raj, Aug 2026). The key is in Vault `pmlo/services/superset` |
+| **Superset MCP** `superset-mcp-th.pmlo.co/mcp` (Redshift: returns, inventory, TOs, NS-vs-ERPLY) | live record state: the best check-up source | **partly, since 12 Oct 2026** — see note below |
 | Superset UI `superset.pomelofashion.com` | same data, as dashboards (e.g. slice 1988 for returns) | no: SSO login plus proxy |
-| NetSuite SuiteAnalytics Connect (ENG 2907668483, draft) | SuiteQL | no: personal login only, no service account |
+| NetSuite SuiteAnalytics Connect (ENG 2907668483, draft) | SuiteQL | no: personal login only, no service account — **this is the actual gap.** Every return/RMA ticket needs NetSuite confirmed and nothing in this repo, or available to a cloud session, can read it at all |
 | Apollo / Henry admin, production DBs | record state | no, and **by design** (invariant 2; SSH per engineer) |
 | GitHub `pomelofashion/*` (repos.yml) | which commit/PR fixed a ticket | partly: needs `add_repo` for the org |
 
-**To turn on live check-ups:** the owner adds `superset-mcp-th.pmlo.co` to
-the environment's network allowlist, and `SUPERSET_MCP_TOKEN` to its secrets
-(or adds the server as a claude.ai custom connector). That is a new
-read-only integration, so it needs his approval (CLAUDE.md invariant 2).
-Until then, write "not verified against Superset" in a fix brief rather
-than implying a check was made.
+**Superset, updated 12 Oct 2026:** a `mcp__superset__*` connector (dataset
+list/get/query, prepared-chart tools) is reachable from an interactive
+Claude Code session and was used to read dataset 153 (`raw_fact_return`) for
+six PESD1 return tickets that day. Not confirmed whether this is the same
+`superset-mcp-th.pmlo.co` host this row originally meant, or a separate
+connector added since. Two real limits either way: it is **read-only over
+curated datasets** (no ad-hoc SQL, no guarantee a given dataset like staff
+clock-in data exists or is visible to this account), and it is **still not
+wired into My-Master's own code** — `core/` has no Superset client, so the
+scheduled flows still cannot self-verify a return's Apollo-side status; only
+an attended session checking by hand can, as happened today. Say which is
+true in a fix brief: "checked via Superset (session)" vs "not checked."
 
 **Never copy the Superset token from Slack.** It has been pasted in plain text
 in several DMs. It belongs in Vault and env secrets only (invariant 7).
