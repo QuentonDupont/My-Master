@@ -23,9 +23,26 @@ STALE_AFTER = dt.timedelta(hours=2)
 
 LAUNCHD_JOBS = ("com.pomelo.flows", "com.pomelo.mcp")
 
-#: A scheduled flow is overdue when its last successful run is older than this
-#: many of its own intervals (Daily flows: older than this many days).
+#: An Every(n) flow is overdue when its last success is older than this many
+#: of its own intervals.
 OVERDUE_INTERVALS = 3
+#: A Daily flow gets one full period (a day, or a week for a weekly one) plus
+#: this much slack before it reads as overdue.
+DAILY_SLACK = dt.timedelta(hours=6)
+
+
+def _allowance(flow) -> dt.timedelta | None:
+    """How long a flow may go without a successful run. None: no schedule."""
+    from core.flow import Daily, Every
+
+    limits = []
+    for t in flow.triggers:
+        if isinstance(t, Every):
+            limits.append(dt.timedelta(seconds=t.seconds * OVERDUE_INTERVALS))
+        elif isinstance(t, Daily):
+            days = 1 if t.weekdays is None else 7 / max(1, len(t.weekdays))
+            limits.append(dt.timedelta(days=days) + DAILY_SLACK)
+    return min(limits) if limits else None
 
 
 def _now() -> dt.datetime:
@@ -136,27 +153,40 @@ def marketing_onsite() -> dict:
 
 
 def flows() -> dict:
-    """Each scheduled flow: last run, last success, and whether it is overdue."""
+    """Each scheduled flow: last run, last success, and whether it is overdue.
+
+    Not overdue: a flow running right now, or one that has never run while the
+    scheduler itself is younger than the flow's allowance (a weekly flow is not
+    late the day the scheduler is installed).
+    """
     try:
         import flows as flows_pkg
         from core import scheduler
-        from core.flow import Daily, Every
 
         reg = flows_pkg.registry()
+        with scheduler.Store() as store:
+            row = store.conn.execute("SELECT MIN(started) m FROM flow_runs").fetchone()
+        first = (dt.datetime.fromisoformat(row["m"]).replace(tzinfo=None)
+                 if row and row["m"] else None)
+        now = _now()
         out = {}
         for st in scheduler.status(reg):
             f = reg[st["flow"]]
-            periods = [t.seconds for t in f.triggers if isinstance(t, Every)]
-            periods += [86400 for t in f.triggers if isinstance(t, Daily)]
-            if not periods:
+            limit = _allowance(f)
+            if limit is None:
                 continue  # human-confirmed: there is no schedule to miss
-            limit = dt.timedelta(seconds=min(periods) * OVERDUE_INTERVALS)
             last_ok = (dt.datetime.fromisoformat(st["last_ok"]).replace(tzinfo=None)
                        if st["last_ok"] else None)
+            if st["running"]:
+                overdue = False
+            elif last_ok is not None:
+                overdue = now - last_ok > limit
+            else:
+                overdue = first is not None and now - first > limit
             out[f.name] = {
                 "last_ok": st["last_ok"],
                 "last_failed": bool(st["last_run"] and st["last_run"]["ok"] is False),
-                "overdue": last_ok is None or _now() - last_ok > limit,
+                "overdue": overdue,
             }
         return out
     except Exception as exc:  # pragma: no cover - reported, never raised
