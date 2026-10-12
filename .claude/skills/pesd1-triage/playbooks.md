@@ -11,6 +11,39 @@ Record paths use the NetSuite account `4449099.app.netsuite.com`.
 
 ---
 
+## [Crashlytics] fatal crash alerts
+
+*Looks like:* summary starting `[Crashlytics] [New Fatal Issue]`, reporter
+Suresh Dhakal (the Firebase integration), low priority, no description beyond
+the crash signature and app version. These arrive in volume and each is its
+own crash, however alike the summaries read — never link two as duplicates.
+
+**This is a fixed route, not a judgment call** (`config/boards.yml`
+`fixed_routes`, applied by `fixed_route_gate` before research or duplicate
+detection runs — reconfirmed by the board owner on PESD1-11335, 12 Oct 2026:
+*"this ticket will always need to be processed by creating a PRDT ticket and
+assigning it to Rahul"*):
+1. PRDT clone, summary and description copied **verbatim** from the PESD1
+   ticket — no rewriting, no fix brief.
+2. Same priority as the source ticket.
+3. Labels `business_continuity` + `tech_ops`; epic PRDT-11608 "[Crashlytics]
+   Fatal crash alerts — Business Continuity" (via
+   `development.epic_by_component.business_continuity`).
+4. Assignee **Rahul Ravindra**, no alternates offered — this is the whole
+   route, not a ranked guess.
+5. Link Cloners; move the PESD1 parent to **To Do** (the standard transition
+   rule, since this is a real dev handoff).
+
+A PESD1 ticket that merely *mentions* Crashlytics in passing (e.g. "fails on
+a Crashlytics-enabled build") does not match — the gate checks the summary
+prefix, not the word anywhere in the ticket.
+
+**Housekeeping:** PRDT-11609 through PRDT-11785 is the series so far, all to
+Rahul under PRDT-11608. Still PROPOSED/To Do as of 12 Oct 2026 and routine to
+approve in batches.
+
+---
+
 ## NetSuite: Inventory Detail / bin missing on an Item Receipt (IR)
 
 *Looks like:* "Please edit/correct the inventory details field IR:xxxx /

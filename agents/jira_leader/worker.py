@@ -63,6 +63,49 @@ def _new_proposal(issue: dict, **kw) -> proposals.Proposal:
     )
 
 
+def fixed_route(issue: dict) -> dict | None:
+    """The configured route this ticket belongs to, if any.
+
+    A ticket family the board owner has already decided how to handle
+    (config/boards.yml `fixed_routes`) — e.g. every Crashlytics fatal-crash
+    alert goes to Rahul Ravindra, verbatim, every time. A match skips
+    duplicate search, the analyst and developer routing entirely; it still
+    produces a proposal the human approves like any other.
+    """
+    summary = (issue.get("fields", {}) or {}).get("summary") or ""
+    for route in config.boards().get("fixed_routes") or []:
+        prefix = route.get("summary_prefix")
+        if prefix and summary.strip().lower().startswith(prefix.lower()):
+            return route
+    return None
+
+
+def routed_proposal(issue: dict, restated: str, route: dict) -> proposals.Proposal:
+    """The proposal a fixed route produces: the clone copies the PESD1 ticket
+    verbatim, labelled and assigned exactly as the route says."""
+    fields = issue.get("fields", {}) or {}
+    priority, _why, _flags = analysis_mod.clone_priority(issue)
+    return _new_proposal(
+        issue, requirement_restated=restated,
+        requester=proposals.Requester(),
+        classification=proposals.NEEDS_CODE, confidence=1.0,
+        proposed_comment=route["comment"],
+        clone=proposals.Clone(
+            target_project=config.dev_project(),
+            summary=fields.get("summary") or "",
+            # Unedited below the rule, so validation can tell it from our line.
+            description=(f"Copied unchanged from {issue['key']}.\n\n----\n\n"
+                         f"{fields.get('description') or ''}"),
+            assignee=route["assignee"],
+            assignee_reason=f"fixed route '{route['name']}' (config/boards.yml)",
+            assignee_alternates=[route["assignee"]],
+            labels=list(route["labels"]),
+            priority=priority,
+            link_type=config.boards()["development"]["link_type"]),
+        pesd1_transition=config.boards()["intake"]["dev_transition"],
+        flags=[f"route:{route['name']}", "requester_unknown"])
+
+
 def _finish(led: ledger_mod.Ledger, proposal: proposals.Proposal, state: str,
             reason: str) -> Outcome:
     problems = proposals.validate(proposal.to_dict())

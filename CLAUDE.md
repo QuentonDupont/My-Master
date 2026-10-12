@@ -130,7 +130,7 @@ mirror, daily-report); manual runs are dry-run unless `--execute`.
 | Flow | Trigger | Agents |
 |---|---|---|
 | intake | every 5m | choose_analyst → poll_intake → reclaim_stale_claims → claim_tickets → triage ×5 → summarise_intake |
-| triage (sub-flow) | per claimed ticket | read_ticket → sanity_gate → never_touch_gate → research → resolve_requester → duplicate_gate → classify → assess_risk → plan_clone → draft_proposal |
+| triage (sub-flow) | per claimed ticket | read_ticket → sanity_gate → never_touch_gate → fixed_route_gate → research → resolve_requester → duplicate_gate → classify → assess_risk → plan_clone → draft_proposal |
 | decisions | every 5m, on `ticket.proposed` | read_decision_labels → apply_decisions → report_decisions |
 | execute | **human confirm only** | select_approved → execute_proposal (each) → summarise_execution |
 | mirror | every 5m, on `ticket.executed` | find_drift → mirror_parent_status → report_mirror |

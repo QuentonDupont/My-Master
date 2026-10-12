@@ -8,6 +8,13 @@ with a trigger (CLAUDE.md > Architecture). On the branch, not yet live:
   them, installs `com.pomelo.flows`). `./tools/install_flows.sh rollback`
   restores them; their scripts still work against the refactored code.
 * **LIVE since 12 Oct 2026** — `com.pomelo.flows` installed, old jobs retired.
+* **Crashlytics fixed route merged into the triage flow** (12 Oct 2026, the
+  board owner reconfirming on PESD1-11335): `fixed_route_gate` in
+  `flows/triage.py`, config in `config/boards.yml` `fixed_routes`. Every
+  `[Crashlytics]` alert clones verbatim to Rahul Ravindra under PRDT-11608,
+  before duplicate detection runs — closing the gap that read PESD1-11337 as
+  a duplicate of 11298. Housekeeping still owed: the PRDT-11609..11785 series
+  is still PROPOSED/To Do and routine to approve.
 * **Daily report goes to a file, not email** (board owner's choice, 12 Oct):
   `review/daily_reports/<date>.md`. `send_report` skips while no Gmail
   credentials are set; `tools/gmail_oauth_setup.py` turns emailing back on.
