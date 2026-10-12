@@ -57,10 +57,17 @@ def sandbox():
         for d in (config.REVIEW_DIR, config.LOG_DIR, config.KNOWLEDGE_DIR,
                   proposals.STORE):
             d.mkdir(parents=True, exist_ok=True)
+        # Like RULES_MD: the content-task and plan stores are computed from
+        # REVIEW_DIR at import time, so they need redirecting explicitly.
+        from agents.marketing_onsite import tasks as mo_tasks, worker as mo_worker
+        saved_mo = (mo_tasks.STORE, mo_worker.PLAN_DIR)
+        mo_tasks.STORE = root / "review" / "content_tasks"
+        mo_worker.PLAN_DIR = root / "review" / "content_plans"
         try:
             with fixture_boards():
                 yield root
         finally:
+            mo_tasks.STORE, mo_worker.PLAN_DIR = saved_mo
             for key, value in saved.items():
                 if key == "STORE":
                     proposals.STORE = value

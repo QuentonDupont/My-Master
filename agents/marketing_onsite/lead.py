@@ -14,14 +14,12 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-from concurrent.futures import ThreadPoolExecutor
 
 from core import log
 from agents.marketing_onsite import sops, surfaces, tasks, worker
 
 LOG = log.get("marketing_onsite")
 
-WORKERS = ("w1", "w2", "w3")
 
 
 def add(request: str, *, surface: str = "", markets=None, assets=None,
@@ -47,30 +45,27 @@ def add(request: str, *, surface: str = "", markets=None, assets=None,
                 f"is how a TH-only offer reaches HK.")
     tasks.save(task)
     LOG.info("content.intake", task=task.task_id, surface=task.surface or "?")
+    _announce(task)
     return task
 
 
+def _announce(task: tasks.ContentTask) -> None:
+    """Wake the content flow. Never lets a journal problem lose the task."""
+    try:
+        from core import events
+        events.emit("content_task.added", task=task.task_id)
+    except Exception as exc:  # the task is saved; the hourly sweep will find it
+        LOG.warn("content.announce_failed", task=task.task_id, error=str(exc)[:200])
+
+
 def run(limit: int = 12) -> list[tasks.ContentTask]:
-    """Draft everything waiting, three at a time."""
-    queue = tasks.in_state(tasks.NEW)[:limit]
-    if not queue:
-        return []
-    for t in queue:
-        t.state = tasks.CLAIMED
-        tasks.save(t)
+    """Draft everything waiting, three at a time. The work is the content flow
+    (flows/content.py)."""
+    from flows.content import CONTENT
 
-    def one(pair):
-        idx, task = pair
-        return worker.draft(task, worker=WORKERS[idx % len(WORKERS)])
-
-    with ThreadPoolExecutor(max_workers=len(WORKERS)) as pool:
-        list(pool.map(one, enumerate(queue)))
-
-    done = [tasks.load(t.task_id) for t in queue]
-    LOG.info("content.run", drafted=sum(1 for t in done
-                                        if t.state == tasks.DRAFTED),
-             needs_input=sum(1 for t in done if t.state == tasks.NEEDS_INPUT))
-    return done
+    result = CONTENT.run(limit=limit)
+    result.raise_for_error()
+    return [tasks.load(task_id) for _, task_id in result.data["claimed"]]
 
 
 def report() -> str:

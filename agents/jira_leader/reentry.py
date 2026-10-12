@@ -40,7 +40,7 @@ import argparse
 import json
 from pathlib import Path
 
-from core import corrections, ledger as ledger_mod, log, proposals
+from core import ledger as ledger_mod, log, proposals
 
 LOG = log.get("reentry")
 
@@ -87,60 +87,16 @@ def escalated(led: ledger_mod.Ledger | None = None) -> list[dict]:
 
 def answer(proposal_id: str, comment: str, *, reason: str = "",
            led: ledger_mod.Ledger | None = None) -> dict:
-    """Attach a human's answer to an escalated proposal and make it reviewable."""
-    comment = (comment or "").strip()
-    if not comment:
-        raise ReentryRefused("an answer with no text is not an answer")
+    """Attach a human's answer to an escalated proposal and make it reviewable.
 
-    own = led is None
-    led = led or ledger_mod.Ledger()
-    try:
-        proposal = proposals.load(proposal_id)
-        row = led.get(proposal.ticket)
-        if row is None:
-            raise ReentryRefused(f"{proposal.ticket} is not in the ledger")
-        if row["state"] != ledger_mod.ESCALATED:
-            raise ReentryRefused(
-                f"{proposal.ticket} is {row['state']}, not {ledger_mod.ESCALATED}; "
-                "re-entry is only for a ticket the system handed to a human")
+    The work is the escalation flow (flows/escalation.py)."""
+    from core.flow import Context
+    from flows.escalation import ESCALATION
 
-        blocked = [f for f in proposal.flags
-                   if f == NEVER_TOUCH_FLAG or f.startswith(f"{NEVER_TOUCH_FLAG}:")]
-        if blocked:
-            raise ReentryRefused(
-                f"{proposal.ticket} is never-touch ({', '.join(blocked)}); "
-                "answer it in Jira yourself, under your own name")
-
-        before = proposal.to_dict()
-        proposal.classification = proposals.ANSWERABLE
-        proposal.proposed_comment = comment
-        proposal.clone = None
-        proposal.pesd1_transition = None
-        proposal.confidence = 1.0          # a person wrote it; it is not a guess
-        proposal.flags = [f for f in proposal.flags if f != "sanity_gate"]
-        if HUMAN_FLAG not in proposal.flags:
-            proposal.flags.append(HUMAN_FLAG)
-
-        problems = proposals.validate(proposal.to_dict())
-        if problems:
-            raise ReentryRefused(f"the answered proposal is invalid: {problems}")
-
-        corrections.record_many(
-            proposal_id, proposals.diff(before, proposal.to_dict()),
-            reason or "answered by the board owner after escalation")
-        proposals.save(proposal)
-
-        # The state machine already allows this; nothing drove it before.
-        led.transition(proposal.ticket, ledger_mod.CLAIMED)
-        led.transition(proposal.ticket, ledger_mod.PROPOSED, proposal_id=proposal_id)
-
-        LOG.info("reentry.answered", ticket=proposal.ticket, proposal=proposal_id,
-                 chars=len(comment))
-        return {"proposal_id": proposal_id, "ticket": proposal.ticket,
-                "state": ledger_mod.PROPOSED, "chars": len(comment)}
-    finally:
-        if own:
-            led.close()
+    result = ESCALATION.run(Context("escalation", trigger="human", data={
+        "proposal_id": proposal_id, "comment": comment, "reason": reason, "led": led}))
+    result.raise_for_error()
+    return result.data["report"]
 
 
 def main(argv: list[str] | None = None) -> int:
