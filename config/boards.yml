@@ -23,7 +23,7 @@ intake:
   # Discover with: python -m core.jira_client fields --grep email
   # PESD1 has "Requester Email" (customfield_10304) but it is populated on 0 of
   # the last 300 tickets, so rule 1 cannot fire — the intake sheet does the work.
-  requester_email_field: ""
+  requester_email_field: customfield_10304
 
 development:
   project: PRDT

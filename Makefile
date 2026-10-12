@@ -38,6 +38,9 @@ queue:  ## poll PESD1 and triage (live; needs .env)
 batch:  ## assemble the approval batch
 	python3 -m agents.jira_leader.batch assemble
 
+work-agent:  ## research open intake, prepare fix plans and requester draft outbox
+	python3 -m agents.jira_leader.work_agent
+
 slack:  ## triage Slack mentions (offline fixtures)
 	python3 -m agents.slack_leader.leader run --file tests/fixtures/mentions.json
 

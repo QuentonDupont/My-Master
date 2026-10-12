@@ -29,7 +29,7 @@ echo "=== board tick $(stamp) ==="
 
 failed=0
 
-echo "--- 1/3 sweep"
+echo "--- 1/4 sweep"
 if "$PY" -m agents.jira_leader.queue run 2>&1 | tail -20; then
   clear_alert board_tick_sweep
 else
@@ -39,7 +39,7 @@ else
     "queue run has been failing — check logs/board_tick.err"
 fi
 
-echo "--- 2/3 labels"
+echo "--- 2/4 labels"
 if "$PY" -m agents.jira_leader.labels poll --apply 2>&1 | tail -20; then
   clear_alert board_tick_labels
 else
@@ -49,7 +49,7 @@ else
     "labels poll has been failing — check logs/board_tick.err"
 fi
 
-echo "--- 3/3 mirror"
+echo "--- 3/4 mirror"
 if "$PY" -m core.status_mirror apply --execute 2>&1 | tail -20; then
   clear_alert board_tick_mirror
 else
@@ -57,6 +57,15 @@ else
   failed=1
   alert_once board_tick_mirror "My-Master: status mirror failing" \
     "status_mirror apply has been failing — check logs/board_tick.err"
+fi
+
+echo "--- 4/4 research and requester drafts"
+if "$PY" -m agents.jira_leader.work_agent 2>&1 | tail -20; then
+  clear_alert board_tick_work_agent
+else
+  failed=1
+  alert_once board_tick_work_agent "My-Master: work agent failing" \
+    "work agent research failed — check logs/board_tick.err"
 fi
 
 if [ "$failed" -eq 0 ]; then

@@ -202,6 +202,11 @@ def process(issue: dict, *, ledger: ledger_mod.Ledger | None = None,
             proposed_comment=analysis.proposed_comment,
             evidence=evidence, clone=clone, pesd1_transition=transition,
             flags=flags)
+        field_id = config.boards()["intake"].get("requester_email_field")
+        if (field_id and requester.source == "sheet" and requester.confidence == "high"
+                and requester.email and not fields.get(field_id)):
+            proposal.requester_email_update = proposals.RequesterEmailUpdate(
+                field_id, fields.get(field_id), requester.email)
         return _finish(led, proposal, ledger_mod.PROPOSED,
                        f"{analysis.classification} via {analysis.analyst}")
     except Exception as exc:  # a worker failure must not take the queue down

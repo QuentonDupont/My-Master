@@ -407,6 +407,15 @@ class JiraWriteClient(_Base):
                                               body={"fields":
                                                     {"priority": {"name": priority}}}))
 
+    def set_requester_email(self, key: str, field_id: str, value: str | None) -> dict:
+        assert_key_allowed(key)
+        configured = config.boards()["intake"].get("requester_email_field")
+        if key.split("-")[0] != config.intake_project() or not configured or field_id != configured:
+            raise ScopeError("requester email field is not configured for this intake ticket")
+        return self._do("set_requester_email", {"key": key, "field_id": field_id},
+                        lambda: self._request("PUT", f"/rest/api/2/issue/{key}",
+                                              body={"fields": {field_id: value}}))
+
     def restore_priority(self, key: str, previous: str) -> dict:  # undo
         return self.set_priority(key, previous)
 

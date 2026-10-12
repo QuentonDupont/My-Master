@@ -122,6 +122,19 @@ class ExecuteTests(unittest.TestCase):
                 self.assertEqual(row["clone_key"], "PRDT-999")
                 self.assertEqual(row["comment_id"], "c-100")
 
+    def test_transition_skips_when_ticket_is_already_in_target_status(self):
+        with sandbox():
+            with L.Ledger() as led:
+                proposal = approved_proposal(led)
+                writer = FakeWriter()
+                writer.status = "In Development"
+                result = E.execute_proposal(proposal.proposal_id, execute=True,
+                                            ledger=led, writer=writer,
+                                            reader=FakeReader())
+                self.assertTrue(result.ok)
+                self.assertNotIn("transition", [name for name, _ in writer.calls])
+                self.assertEqual(led.get(proposal.ticket)["state"], L.EXECUTED)
+
     def test_clone_uses_the_issue_type_from_boards_yml(self):
         from core import config
         with sandbox():

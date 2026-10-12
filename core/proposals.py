@@ -70,6 +70,13 @@ class Clone:
 
 
 @dataclass
+class RequesterEmailUpdate:
+    field_id: str
+    previous: str | None
+    value: str
+
+
+@dataclass
 class Proposal:
     proposal_id: str
     ticket: str
@@ -83,6 +90,7 @@ class Proposal:
     clone: Clone | None = None
     pesd1_transition: str | None = None
     flags: list[str] = field(default_factory=list)
+    requester_email_update: RequesterEmailUpdate | None = None
 
     # -- serialisation -----------------------------------------------------
     def to_dict(self) -> dict:
@@ -116,6 +124,8 @@ class Proposal:
             clone=Clone(**clone) if clone else None,
             pesd1_transition=data.get("pesd1_transition"),
             flags=list(data.get("flags") or []),
+            requester_email_update=RequesterEmailUpdate(**data["requester_email_update"])
+            if data.get("requester_email_update") else None,
         )
 
     @classmethod
@@ -192,6 +202,8 @@ def validate(data: dict) -> list[str]:  # noqa: C901 - a checklist, kept flat on
     clone = data.get("clone")
 
     if cls == ESCALATE:
+        if data.get("requester_email_update"):
+            p.append("ESCALATE must not update requester email")
         if comment.strip():
             p.append("ESCALATE must carry no proposed_comment (invariant 3)")
         if clone:
@@ -251,6 +263,22 @@ def validate(data: dict) -> list[str]:  # noqa: C901 - a checklist, kept flat on
 
     if not isinstance(data.get("flags"), list):
         p.append("flags must be a list")
+
+    update = data.get("requester_email_update")
+    if update:
+        expected = config.boards()["intake"].get("requester_email_field")
+        if not expected or update.get("field_id") != expected:
+            p.append("requester email update must use the configured field")
+        if requester.get("source") != "sheet" or requester.get("confidence") != "high":
+            p.append("requester email update requires an exact sheet match")
+        if not requester.get("matched_row"):
+            p.append("requester email update requires sheet evidence")
+        if update.get("value") != requester.get("email"):
+            p.append("requester email update disagrees with matched email")
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", str(update.get("value", ""))):
+            p.append("requester email update is not a valid email")
+        if update.get("previous") not in (None, ""):
+            p.append("requester email update must not overwrite an existing value")
 
     for secret in config.known_secrets():
         if secret and len(secret) >= 8 and (secret in comment or secret in json.dumps(clone or {})):
