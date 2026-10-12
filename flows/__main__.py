@@ -50,7 +50,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{'':<14} {' -> '.join(a.name for a in f.agents)}\n")
         return 0
     if args.cmd == "show":
-        print(json.dumps(flows.get(args.flow).describe(), indent=2))
+        try:
+            print(json.dumps(flows.get(args.flow).describe(), indent=2))
+        except KeyError as exc:
+            print(f"error: {exc.args[0]}", file=sys.stderr)
+            return 2
         return 0
     if args.cmd == "tick":
         print(json.dumps(scheduler.tick(flows.registry()), indent=2))
@@ -65,9 +69,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
+        flow = flows.get(args.flow)
+        data = json.loads(args.data)
+        if not isinstance(data, dict):
+            raise ValueError("--data must be a JSON object")
+    except KeyError as exc:
+        print(f"error: {exc.args[0]}", file=sys.stderr)
+        return 2
+    except ValueError as exc:  # json.JSONDecodeError is a ValueError
+        print(f"error: bad --data: {exc}", file=sys.stderr)
+        return 2
+    try:
         result = scheduler.run_flow(
-            flows.get(args.flow), trigger=args.trigger, execute=args.execute,
-            confirm=args.confirm, notify=args.from_tick, data=json.loads(args.data))
+            flow, trigger=args.trigger, execute=args.execute,
+            confirm=args.confirm, notify=args.from_tick, data=data)
     except FlowError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2

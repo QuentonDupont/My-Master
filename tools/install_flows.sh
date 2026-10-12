@@ -26,10 +26,11 @@ DOMAIN="gui/$(id -u)"
 
 unload() { launchctl bootout "$DOMAIN/$1" 2>/dev/null || true; rm -f "$AGENTS/$1.plist"; }
 load() {
-  sed -e "s#/Users/quenton-d/My-Master#$ROOT#g" "$ROOT/tools/$1.plist" > "$AGENTS/$1.plist"
+  # Explicit returns: `set -e` does not apply inside a function called from `if`.
+  sed -e "s#/Users/quenton-d/My-Master#$ROOT#g" "$ROOT/tools/$1.plist" > "$AGENTS/$1.plist" || return 1
   launchctl bootout "$DOMAIN/$1" 2>/dev/null || true
-  launchctl bootstrap "$DOMAIN" "$AGENTS/$1.plist"
-  launchctl enable "$DOMAIN/$1"
+  launchctl bootstrap "$DOMAIN" "$AGENTS/$1.plist" || return 1
+  launchctl enable "$DOMAIN/$1" || return 1
 }
 
 case "${1:-install}" in
@@ -37,8 +38,14 @@ case "${1:-install}" in
     unload "$LABEL"; echo "removed $LABEL"; exit 0 ;;
   rollback)
     unload "$LABEL"
-    for j in $OLD; do [ -f "$ROOT/tools/$j.plist" ] && load "$j" && echo "restored $j"; done
-    echo "rolled back to the per-job schedules"; exit 0 ;;
+    failed=0
+    for j in $OLD; do
+      [ -f "$ROOT/tools/$j.plist" ] || continue
+      if load "$j"; then echo "restored $j"; else echo "FAILED to restore $j"; failed=1; fi
+    done
+    [ "$failed" -eq 0 ] && echo "rolled back to the per-job schedules" \
+      || echo "rollback incomplete: check launchctl list | grep pomelo"
+    exit "$failed" ;;
   install) ;;
   *) echo "usage: $0 [install|rollback|remove]"; exit 2 ;;
 esac
@@ -47,7 +54,7 @@ case "$ROOT" in "$HOME"/Desktop/*|"$HOME"/Documents/*|"$HOME"/Downloads/*)
   echo "launchd cannot read a repo under Desktop/Documents/Downloads (macOS TCC)."; exit 1 ;;
 esac
 
-if ! grep -qE '^JIRA_API_TOKEN=.+' "$ROOT/.env" 2>/dev/null; then
+if ! grep -qE '^JIRA_API_TOKEN=["'"'"']?[^"'"'"'[:space:]]' "$ROOT/.env" 2>/dev/null; then
   echo "JIRA_API_TOKEN is not set in .env — every Jira flow would fail."; exit 1
 fi
 
@@ -60,9 +67,14 @@ echo "checking Jira access…"
   || { echo "  cannot reach Jira; not installing"; exit 1; }
 
 mkdir -p "$AGENTS" "$ROOT/logs/flows"
+# New job first: if it cannot load, the old jobs keep running and nothing is
+# left unscheduled. A minute of overlap is harmless — ledger claims are atomic
+# and every flow holds its own lock.
+if ! load "$LABEL"; then
+  echo "could not load $LABEL; the old jobs are untouched"; exit 1
+fi
 for j in $OLD; do unload "$j"; done
 echo "retired: $OLD"
-load "$LABEL"
 
 echo
 echo "installed $LABEL — a tick every minute"

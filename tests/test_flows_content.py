@@ -62,6 +62,28 @@ class EscalationFlowTests(unittest.TestCase):
                 scheduler.run_flow(ESCALATION, trigger="schedule", confirm=True)
 
 
+class CliTests(unittest.TestCase):
+    def test_bad_input_is_a_clean_error_not_a_traceback(self):
+        import contextlib
+        import io
+
+        from flows.__main__ import main
+
+        with sandbox():
+            for argv in (["run", "nosuch"], ["show", "nosuch"],
+                         ["run", "escalation", "--confirm", "--data", "{bad"],
+                         ["run", "escalation", "--confirm", "--data", "[1]"]):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(argv), 2, argv)
+                self.assertTrue(err.getvalue().startswith("error:"), argv)
+
+    def test_missing_proposal_id_says_so(self):
+        with sandbox():
+            res = ESCALATION.run(comment="the answer")
+            self.assertIn("proposal_id is required", res.error)
+
+
 class McpFlowsStatusTests(unittest.TestCase):
     def test_flows_status_lists_every_flow_and_the_execute_backlog(self):
         from tools import mcp_server as M

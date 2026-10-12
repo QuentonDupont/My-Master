@@ -10,11 +10,23 @@ from core.flow import (JIRA_WRITE, READ, Agent, Context, Daily, Every, Flow,
 from tests.helpers import fixture_boards, sandbox
 
 
+class Sandboxed(unittest.TestCase):
+    """Flow runs log to logs/; keep them out of the real repo's logs."""
+
+    def setUp(self):
+        import contextlib
+        self._stack = contextlib.ExitStack()
+        self._stack.enter_context(sandbox())
+
+    def tearDown(self):
+        self._stack.close()
+
+
 def _a(name, fn=lambda ctx: None, effect="local"):
     return Agent(name, fn, effect)
 
 
-class GuardrailTests(unittest.TestCase):
+class GuardrailTests(Sandboxed):
     def test_only_sanctioned_agents_may_write_to_jira(self):
         with self.assertRaises(FlowError):
             _a("post_comment", effect=JIRA_WRITE)
@@ -60,7 +72,7 @@ class GuardrailTests(unittest.TestCase):
         self.assertEqual(seen, {"dry": False, "live": True})
 
 
-class RunTests(unittest.TestCase):
+class RunTests(Sandboxed):
     def test_agents_share_context_in_order(self):
         @agent("first", READ)
         def first(ctx):
@@ -131,7 +143,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(d["steps"], ["a [read]"])
 
 
-class TriggerTests(unittest.TestCase):
+class TriggerTests(Sandboxed):
     def test_daily_slot(self):
         t = Daily("09:00", weekdays=(0,))
         monday = dt.datetime(2026, 10, 12, 9, 30)
@@ -287,7 +299,7 @@ class SchedulerTests(unittest.TestCase):
                 self.assertEqual(launched, [1])
 
 
-class ContextTests(unittest.TestCase):
+class ContextTests(Sandboxed):
     def test_context_access(self):
         ctx = Context("f", data={"a": 1})
         ctx["b"] = 2

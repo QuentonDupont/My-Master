@@ -33,6 +33,8 @@ def _r():
 def check_escalation(ctx):
     """Only a non-empty answer, to an ESCALATED ticket that is not never-touch."""
     r = _r()
+    if not ctx.get("proposal_id"):
+        raise r.ReentryRefused("which proposal? proposal_id is required")
     comment = (ctx.get("comment") or "").strip()
     if not comment:
         raise r.ReentryRefused("an answer with no text is not an answer")
