@@ -157,20 +157,23 @@ fi
 # ---------------------------------------------------------------- 7. schedules
 step "7/7 Scheduled jobs"
 OS="$(uname -s)"
-ALL="board corpus report mcp"
+ALL="flows mcp"
+# Retired per-job schedules, replaced by the flows scheduler. Still removed by
+# --remove-schedules, and still installable by name for a rollback.
+LEGACY="board corpus report"
 [ "$SCHEDULES" = "all" ] && SCHEDULES="${ALL// /,}"
-label_for() { case "$1" in board) echo com.pomelo.board-tick;; corpus) echo com.pomelo.corpus-refresh;; report) echo com.pomelo.daily_report;; mcp) echo com.pomelo.mcp;; esac; }
+label_for() { case "$1" in flows) echo com.pomelo.flows;; board) echo com.pomelo.board-tick;; corpus) echo com.pomelo.corpus-refresh;; report) echo com.pomelo.daily_report;; mcp) echo com.pomelo.mcp;; esac; }
 
 needs_ok() {  # the same guards the install_*.sh scripts apply
   case "$1" in
-    board|corpus) have JIRA_API_TOKEN || { warn "$1: JIRA_API_TOKEN missing, not installing"; return 1; } ;;
+    flows|board|corpus) have JIRA_API_TOKEN || { warn "$1: JIRA_API_TOKEN missing, not installing"; return 1; } ;;
     report) { have GMAIL_OAUTH_REFRESH_TOKEN || have REPORT_EMAIL_APP_PASSWORD; } && have REPORT_EMAIL_FROM || { warn "report: email credentials missing, not installing"; return 1; } ;;
     mcp) have MCP_AUTH_TOKEN || { warn "mcp: MCP_AUTH_TOKEN missing"; return 1; } ;;
   esac
 }
 
 if [ "$REMOVE" -eq 1 ]; then
-  for j in $ALL; do
+  for j in $ALL $LEGACY; do
     L="$(label_for "$j")"
     if [ "$OS" = "Darwin" ]; then
       launchctl bootout "gui/$(id -u)/$L" 2>/dev/null; rm -f "$HOME/Library/LaunchAgents/$L.plist"
@@ -185,7 +188,7 @@ elif [ -z "$SCHEDULES" ]; then
   echo "        IMPORTANT: run the scheduled jobs on ONE machine only. See SETUP.md, 'One writer'."
 elif [ "$YES" -ne 1 ]; then
   warn "scheduling changes the machine, so add --yes to confirm:  ./setup.sh --schedules $SCHEDULES --yes"
-  echo "        Reminder: only ONE machine may run board/corpus at a time."
+  echo "        Reminder: only ONE machine may run the flows scheduler at a time."
 else
   PYABS="$(command -v "$PY")"
   if [ "$OS" = "Darwin" ]; then
@@ -207,6 +210,7 @@ else
     for j in ${SCHEDULES//,/ }; do
       needs_ok "$j" || continue
       case "$j" in
+        flows)  LINES+="* * * * * cd '$ROOT' && LOG_STDERR=0 '$PYABS' -m flows tick >> logs/flows_tick.out 2>> logs/flows_tick.err"$'\n' ;;
         board)  LINES+="*/5 * * * * cd '$ROOT' && PY='$PYABS' ./tools/board_tick.sh >> logs/board_tick.out 2>> logs/board_tick.err"$'\n' ;;
         corpus) LINES+="0 */2 * * * cd '$ROOT' && PY='$PYABS' ./tools/corpus_refresh.sh >> logs/corpus_refresh.out 2>> logs/corpus_refresh.err"$'\n' ;;
         report) LINES+="0 9 * * * cd '$ROOT' && '$PYABS' -m agents.chief_of_staff.daily_report run --send >> logs/daily_report.out 2>> logs/daily_report.err"$'\n' ;;

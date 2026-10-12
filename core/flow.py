@@ -77,14 +77,20 @@ class Every:
 class Daily:
     at: str                              # "HH:MM", machine local time
     weekdays: tuple[int, ...] | None = None  # 0 = Monday; None = every day
+    #: A slot missed by more than this (machine asleep, scheduler just
+    #: installed) is skipped, not run late — a 09:00 email should not arrive
+    #: at 16:00 because that is when the laptop woke up.
+    grace_seconds: int = 3 * 3600
 
     def slot(self, now: dt.datetime) -> dt.datetime | None:
-        """The most recent scheduled instant at or before `now`, if today has one."""
+        """Today's scheduled instant, if it has passed and is still in grace."""
         hh, mm = (int(x) for x in self.at.split(":"))
         if self.weekdays is not None and now.weekday() not in self.weekdays:
             return None
         slot = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-        return slot if slot <= now else None
+        if slot > now or (now - slot).total_seconds() > self.grace_seconds:
+            return None
+        return slot
 
     def describe(self) -> str:
         names = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")

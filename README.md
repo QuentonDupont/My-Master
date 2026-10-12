@@ -126,11 +126,17 @@ exactly like an edit made in the batch file, so the learning loop sees it.
 
 ## Daily loop
 
+Everything recurring runs as flows of single-purpose agents, started by
+`com.pomelo.flows` (one launchd job, every minute): triage every 5 minutes,
+label decisions as they appear, status mirroring, research, corpus refresh,
+the 09:00 email, Monday rule proposals. `make flows` lists them;
+`make flows-status` shows how each last ran. What is left for you:
+
 ```bash
 make brief      # what is waiting for you, escalations, cost, errors
-make queue      # triage new tickets
-make batch      # assemble the approval batch
-make rules      # weekly: propose rules from the corrections log
+make batch      # assemble the approval batch (or label tickets in Jira)
+make execute    # dry run of approved proposals; EXEC=--execute to write
+make flow FLOW=intake   # run any flow by hand (dry run unless EXEC=--execute)
 ```
 
 Recommendations to action in Jira yourself (the system never deletes a ticket):

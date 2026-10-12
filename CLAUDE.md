@@ -87,18 +87,58 @@ Do not query, write to, or reason about any other Jira project.
 
 ## Architecture
 
-Three standing agents. Workers are ephemeral — spawned per unit of work, terminated on
-completion. Concurrency, not specialisation.
+Many single-purpose agents, chained into flows, each flow started by a trigger.
+No standing "department" agent owns more than one action. (Until 12 Oct 2026
+this was four standing agents — Jira Leader, Historian, Chief of Staff, Slack
+Leader — each owning many actions and chained by shell scripts.)
 
-| Agent | Standing | Workers | Owns |
-|---|---|---|---|
-| Jira Leader | 1 | 5 concurrent, one per ticket | Queue, ledger, batch assembly, execution |
-| Historian | 1 | — (index + query layer) | Retrieval, SOP drafting |
-| Chief of Staff | 1 | — | Morning brief, rule proposals, cost, error review |
+- **Agent** (`core/flow.py`) — one action, a function `run(ctx)`, and the one
+  side-effect class it may have: `read`, `local` (ledger, review/, knowledge/,
+  logs/), `jira_write` or `email`.
+- **Flow** — an ordered chain of agents, or a `ForEach` fanning a sub-flow over
+  items (the per-ticket triage, 5 at a time). Each step either stops the flow on
+  failure or records it and continues. An agent ends a flow early, successfully,
+  with `ctx.stop(reason)` — the gates do this.
+- **Trigger** — `Every(seconds)`, `Daily(at, weekdays)`, `On(event)`, `Human()`.
+- **Events** — every ledger state change writes `ticket.<state>` to the
+  `events` table in the same transaction; `content_task.added` is emitted by
+  Marketing & Onsite intake. A flow's event cursor starts at the journal's end.
+- **Scheduler** (`core/scheduler.py`) — launchd runs `python -m flows tick`
+  every minute (`com.pomelo.flows`). Each due flow starts in its own process
+  under a per-flow lock; every run is recorded in `flow_runs`; a failing
+  scheduled flow raises one macOS alert until it succeeds again.
 
-Build order is Historian → Jira Leader → Chief of Staff.
-Slack is out of scope for this repo; it is handled elsewhere.
-Do not start a later component before the earlier one meets its acceptance criteria.
+The runtime enforces invariant 1 when a flow is defined, not when it runs:
+only `execute_proposal` and `mirror_parent_status` may declare `jira_write`, and
+a flow containing `execute_proposal` cannot be given any trigger but `Human()`.
+Scheduled runs are dry-run unless the flow is `live_when_scheduled` (decisions,
+mirror, daily-report); manual runs are dry-run unless `--execute`.
+
+| Flow | Trigger | Agents |
+|---|---|---|
+| intake | every 5m | choose_analyst → poll_intake → reclaim_stale_claims → claim_tickets → triage ×5 → summarise_intake |
+| triage (sub-flow) | per claimed ticket | read_ticket → sanity_gate → never_touch_gate → research → resolve_requester → duplicate_gate → classify → assess_risk → plan_clone → draft_proposal |
+| decisions | every 5m, on `ticket.proposed` | read_decision_labels → apply_decisions → report_decisions |
+| execute | **human confirm only** | select_approved → execute_proposal (each) → summarise_execution |
+| mirror | every 5m, on `ticket.executed` | find_drift → mirror_parent_status → report_mirror |
+| research | every 15m | open_research → fetch_open_work → plan_tickets → build_outbox → write_review → flag_failed_tickets |
+| corpus | every 2h | export_pesd1 → export_prdt → build_index |
+| confluence | Mon 07:00 | export_confluence → build_index |
+| content | on `content_task.added`, hourly | claim_new_tasks → draft_plan ×3 → summarise_content |
+| escalation | human (an answer) | check_escalation → rewrite_proposal → record_correction → requeue_ticket |
+| daily-report | 09:00 | check_health → build_brief → assemble_report → render_report → send_report |
+| rules | Mon 08:30 | cluster_corrections → write_rule_proposals |
+| housekeeping | hourly | rotate_logs → prune_run_history |
+
+`python -m flows list | show <flow> | run <flow> [--execute] [--confirm] | tick |
+status | runs`. The old module CLIs (`queue run`, `labels poll`, `batch execute`,
+`reentry answer`, `lead run`, `work_agent`) still work: each is a thin entry
+point that runs its flow, so there is one code path per action. The packages
+under `agents/` are libraries the agents call; they orchestrate nothing.
+
+Adding an action: write one agent (one effect, one docstring line), put it in
+the flow it belongs to, and give a new flow a trigger. A flow without a trigger
+is a sub-flow. Never widen an agent to do a second thing — add a second agent.
 
 ---
 
@@ -107,14 +147,20 @@ Do not start a later component before the earlier one meets its acceptance crite
 ```
 /config          .env.example, boards.yml, never_touch.yml, repos.yml
 /corpus          export + index scripts, SQLite FTS db (gitignored)
-/agents
-  /historian     retrieval + SOP drafting
-  /jira_leader   queue, workers, batch assembly
-  /chief_of_staff
+/flows           one module per flow: its agents and its Flow (+ the CLI)
+/agents          libraries the flow agents call — no orchestration
+  /historian       retrieval + SOP drafting
+  /jira_leader     gates, analysis, clone brief, labels, batch, re-entry, research
+  /chief_of_staff  brief, health, rules, daily report
+  /marketing_onsite content tasks, surfaces, SOPs, change-plan drafting
 /core
+  flow.py        agents, flows, triggers — the runtime and its guardrails
+  scheduler.py   the tick: what is due, locks, run history, alerts
+  events.py      the event journal (written by ledger.py, read by flows)
   ledger.py      SQLite state machine, the ONLY place ledger state changes
   proposals.py   proposal schema, validation, serialisation
   execute.py     execute_proposal() and undo() — the only Jira write path
+  status_mirror.py the status-mirroring exception
   jira_client.py thin API wrapper, read and write split into two classes
 /knowledge
   rules.md       human-approved routing and handling rules — injected into workers
@@ -209,6 +255,8 @@ In order:
 ---
 
 ## Worker loop (per ticket)
+
+Each step is its own agent in the triage flow (`flows/triage.py`).
 
 1. Read summary, description, comments, attachments, reporter.
 2. **Sanity gate** — can I state the requirement in one sentence? No → `ESCALATED`, stop.

@@ -1,4 +1,4 @@
-.PHONY: help test demo demo-reset queue batch brief rules clean mirror mirror-apply labels tick tick-install corpus-refresh corpus-refresh-install mcp connector-install connector-url
+.PHONY: help test flows flow flows-status flows-runs flows-tick flows-install flows-rollback execute demo demo-reset queue batch brief rules clean mirror mirror-apply labels tick tick-install corpus-refresh corpus-refresh-install mcp connector-install connector-url
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -50,16 +50,40 @@ connector-url:  ## the permanent connector URL, and whether it answers
 mcp:  ## MCP server for the Claude app connector (needs MCP_AUTH_TOKEN)
 	python3 -m tools.mcp_server --host $(or $(HOST),127.0.0.1)
 
-tick:  ## one board pass: sweep, read labels, mirror status
+flows:  ## every flow: its trigger and its chain of agents
+	python3 -m flows list
+
+flow:  ## run one flow now, dry-run (FLOW=intake; add EXEC=--execute to write)
+	python3 -m flows run $(FLOW) $(EXEC)
+
+flows-status:  ## last run, lock and pending events per flow
+	python3 -m flows status
+
+flows-runs:  ## recent run history (FLOW=name to filter)
+	python3 -m flows runs $(FLOW)
+
+flows-tick:  ## start every due flow once, here (what launchd runs each minute)
+	python3 -m flows tick
+
+flows-install:  ## schedule the flows (one launchd job) and retire the old jobs
+	./tools/install_flows.sh
+
+flows-rollback:  ## back to the old per-job launchd schedules
+	./tools/install_flows.sh rollback
+
+execute:  ## carry out approved proposals: dry run; EXEC=--execute to write to Jira
+	python3 -m flows run execute --confirm $(EXEC)
+
+tick:  ## legacy: one board pass via the old shell script (rollback only)
 	./tools/board_tick.sh
 
-tick-install:  ## run that pass every 5 minutes via launchd
+tick-install:  ## legacy: the old 5-minute launchd job (use flows-install)
 	./tools/install_tick.sh
 
 corpus-refresh:  ## catch tickets updated recently and reindex (read-only)
-	./tools/corpus_refresh.sh
+	python3 -m flows run corpus
 
-corpus-refresh-install:  ## run that pass every 2 hours via launchd
+corpus-refresh-install:  ## legacy: the old 2-hour launchd job (use flows-install)
 	./tools/install_corpus_refresh.sh
 
 labels:  ## read triage-approved / triage-rejected labels off the board
@@ -75,7 +99,7 @@ brief:  ## morning brief
 	python3 -m agents.chief_of_staff.brief brief
 
 rules:  ## propose rules from knowledge/corrections.jsonl
-	python3 -m agents.chief_of_staff.rules --write
+	python3 -m flows run rules
 
 clean: demo-reset  ## demo-reset plus the corpus index
 	rm -f corpus/corpus.db corpus/corpus.db-wal corpus/corpus.db-shm

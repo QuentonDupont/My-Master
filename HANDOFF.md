@@ -1,3 +1,22 @@
+# Handoff — 12 Oct 2026: flows refactor (branch `refactor/agentic-flows`)
+
+Everything recurring is now single-purpose agents chained into flows, each
+with a trigger (CLAUDE.md > Architecture). On the branch, not yet live:
+
+* **Live machine still runs the old jobs** (`board-tick`, `corpus-refresh`,
+  `daily_report`). To switch: merge, then `./tools/install_flows.sh` (retires
+  them, installs `com.pomelo.flows`). `./tools/install_flows.sh rollback`
+  restores them; their scripts still work against the refactored code.
+* The 09:00 report **failed on 12 Oct** — `MailerNotConfigured`, no Gmail auth.
+  Run `python3 tools/gmail_oauth_setup.py` once. Under flows this failure
+  fails the daily-report flow and raises one alert, instead of only an exit 1.
+* New behaviour: `rules` now actually runs weekly (Mon 08:30, proposals only);
+  `confluence` refreshes weekly (Mon 07:00, read-only); research runs every
+  15m instead of every 5m; mirror moves are journalled in `execution_log`.
+* `make demo` claims nothing, and did before this branch: it reads the live
+  `config/boards.yml` (open status "Waiting Support") against fixtures marked
+  "Waiting for Support". The tests use fixture boards and are unaffected.
+
 # Handoff — 18 Sep 2026
 
 Read this with CLAUDE.md. It is the state of play, not the spec.

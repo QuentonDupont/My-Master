@@ -63,10 +63,28 @@ core/execute.py  (the ONLY Jira write path)                        ▼
 Marketing & Onsite: Apollo content drafts, staged inactive   them to knowledge/rules.md
 ```
 
-Three standing agents plus one team (workers are ephemeral, one per unit of work):
+Since 12 Oct 2026 the work is done by single-purpose **agents** chained into
+**flows**, each started by a **trigger** (a schedule, an event, or a human
+confirm). One launchd job, `com.pomelo.flows`, ticks every minute and starts
+whatever is due. CLAUDE.md > Architecture has the full table; `python3 -m flows
+list` prints it.
 
-| Agent | Job | Entry points |
-|---|---|---|
+| Flow | Trigger | Does | Code |
+|---|---|---|---|
+| intake → triage | every 5m | sweep PESD1, claim, triage each ticket into a proposal | `flows/intake.py`, `flows/triage.py` |
+| decisions | every 5m, on `ticket.proposed` | record `triage-approved/rejected` labels | `flows/decisions.py` |
+| execute | **human confirm only** | the single Jira write path for approved proposals | `flows/execute.py` |
+| mirror | every 5m, on `ticket.executed` | move PESD1 parents forward to match their clone | `flows/mirror.py` |
+| research | every 15m | fix plans and unsent requester drafts | `flows/research.py` |
+| corpus / confluence | every 2h / Mon 07:00 | refresh the Historian's index | `flows/corpus.py` |
+| content | on `content_task.added`, hourly | draft Apollo content plans, staged inactive | `flows/content.py` |
+| escalation | human (an answer) | turn the board owner's answer into a proposal | `flows/escalation.py` |
+| daily-report / rules | 09:00 / Mon 08:30 | status email / rule proposals | `flows/report.py` |
+| housekeeping | hourly | cap logs, prune run history | `flows/housekeeping.py` |
+
+The packages under `agents/` are the libraries those agents call.
+
+---|---|---|
 | **Historian** | Search index over past tickets, Confluence, GitHub; duplicate detection; assignee ranking; SOP drafting | `agents/historian`, `corpus/` |
 | **Jira Leader** | Poll the board, run workers, assemble approval batches, hand approved work to execution | `agents/jira_leader` |
 | **Chief of Staff** | Morning brief, 09:00 emailed daily report, health checks, board ranking, rule proposals, cost and error review | `agents/chief_of_staff` |
@@ -177,7 +195,7 @@ eats `*` (`COUNT(*)` posts as `COUNT(_)`); use a fenced block and read the comme
 * **Evidence weight.** Confluence SOPs outrank ticket history. Approved novel
   resolutions should become Confluence pages (published by a human).
 * **Corpus.** `corpus/raw/*.jsonl` (exports) → `corpus/corpus.db` (SQLite FTS5). The
-  corpus-refresh job merges tickets *updated* in the last 3 days every 2 hours.
+  corpus flow merges tickets *updated* in the last 3 days every 2 hours.
   Confluence is refreshed manually. Ledger and corpus are **local SQLite**; there is
   no server database.
 * **If you work in Claude Code here:** `CLAUDE.md` and `.claude/skills/` load
@@ -220,6 +238,10 @@ python3 -m core.recommendations list    # tickets for YOU to close; the system n
 python3 -m agents.marketing_onsite.lead add "pull the banner off HK" --surface web_hero --markets TH
 python3 -m agents.marketing_onsite.lead run | report
 python3 -m agents.chief_of_staff.daily_report run [--send]
+# Flows
+python3 -m flows list | status | runs [flow]
+python3 -m flows run <flow> [--execute]           # dry run unless --execute
+python3 -m flows run execute --confirm --execute  # carry out approved proposals
 ```
 
 ---
@@ -247,14 +269,19 @@ missing). Nothing here posts, comments, clones or emails except the daily report
 
 | Job | Every | Does | Writes outward? | Needs |
 |---|---|---|---|---|
-| `board` (`tools/board_tick.sh`) | 5 min | sweep → record `triage-approved/rejected` labels → mirror PESD1 status | **Only** the sanctioned status mirror | Jira |
-| `corpus` (`tools/corpus_refresh.sh`) | 2 h | merge recently updated tickets, rebuild index | No | Jira |
-| `report` (`agents.chief_of_staff.daily_report run --send`) | 09:00 local | status email | **Emails the board owner** | Gmail creds |
+| `flows` (`python3 -m flows tick`) | 1 min | starts every due flow (table in section 2), each in its own process under its own lock | **Only** the sanctioned status mirror and the daily report email. `execute` never runs from a schedule | Jira; Gmail creds for the email |
 | `mcp` (`tools.mcp_server`, always on) | n/a | phone connector | Only via approved `execute` | `MCP_AUTH_TOKEN` + public URL |
 
-Failures raise a one-time macOS notification (`osascript`; silent on Linux) and write
-`logs/.heartbeat_*`; `agents.chief_of_staff.health` reads those. Logs are capped by
-`tools/rotate_logs.sh`. **Linux:** the daily report time is the machine's local time
+`python3 -m flows status` shows each flow's last run and pending events;
+`python3 -m flows runs [flow]` the history; each flow's output is in
+`logs/flows/<flow>.out`. On macOS, `./tools/install_flows.sh` installs the job and
+retires the old `board-tick`, `corpus-refresh` and `daily_report` jobs;
+`./tools/install_flows.sh rollback` restores them (their scripts still work).
+
+A failing flow raises a one-time macOS notification (`osascript`; silent on Linux)
+until it succeeds again, and writes `logs/.heartbeat_flow_<name>` on success; the
+daily report's FLOWS line lists any flow that is overdue or whose last run failed.
+Logs are capped by the housekeeping flow. **Linux:** the daily report time is the machine's local time
 (Bangkok at Pomelo); run `mcp` under systemd or supervisor:
 `python3 -m tools.mcp_server --host 127.0.0.1 --port 8766` with `WorkingDirectory` at the
 repo and `Restart=always`. **macOS:** launchd cannot read scripts under `~/Desktop`,

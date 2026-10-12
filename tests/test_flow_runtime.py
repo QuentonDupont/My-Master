@@ -139,6 +139,7 @@ class TriggerTests(unittest.TestCase):
         self.assertIsNone(t.slot(monday.replace(hour=8)))
         self.assertIsNone(t.slot(monday + dt.timedelta(days=1)))
         self.assertEqual(t.describe(), "on Mon at 09:00")
+        self.assertIsNone(t.slot(monday.replace(hour=12, minute=1)))   # past grace
 
     def test_on_prefix(self):
         self.assertTrue(On("ticket.").matches("ticket.approved"))
