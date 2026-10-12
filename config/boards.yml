@@ -80,6 +80,25 @@ fixed_routes:
     assignee: Rahul Ravindra
     comment: "This is an automated Crashlytics crash alert. It has been passed to the Android team as a development ticket, linked here."
 
+# Ticket families whose correct developer is already known, but whose
+# content still needs the normal case-by-case research and a case-aware
+# comment — unlike fixed_routes above, nothing else here is skipped. The
+# first label still picks the epic via development.epic_by_component, so an
+# override's labels should lead with an epic that already resolves (e.g.
+# "netsuite", not a label with no epic_by_component entry).
+assignee_overrides:
+  - name: ncg_item_creation
+    # "Request to create new NCG item: <name> (<code>)" — the current intake
+    # form's wording, confirmed against PESD1-11326/27/28/33/34 (28 Sep-9 Oct
+    # 2026), all cloned to Vishal under PRDT-10732 "NetSuite Support
+    # Tickets". Older tickets used different wording ("Request to Create New
+    # SKU – ...") and are not covered — a widened prefix would also catch
+    # PESD1-10877 "Unable to Process Receipts for NCG Transfer Orders", a
+    # different problem entirely.
+    summary_prefix: "Request to create new NCG item"
+    assignee: Vishal Gaikwad
+    labels: [netsuite, ncg]
+
 # Hard allowlist. core/jira_client.py refuses any key outside this list.
 allowed_projects:
   - PESD1

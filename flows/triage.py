@@ -14,7 +14,9 @@ If any agent fails, `release_ticket` records the error and moves the ticket
 back to NEW, so the next sweep picks it up again — a crash never strands a
 claim.
 
-Context in:  issue, and optionally led, historian, analyst, sheet, rules.
+Context in:  issue, and optionally led, historian, analyst, sheet, rules,
+             reuse_proposal_id (the retriage flow's: correct a stored
+             proposal in place instead of minting a new one).
 Context out: outcome — {ticket, state, proposal_id, reason}.
 """
 from __future__ import annotations
@@ -68,7 +70,7 @@ def sanity_gate(ctx):
         ctx["restated"] = restated
         return
     _decide(ctx, _w()._new_proposal(
-        ctx["issue"],
+        ctx["issue"], proposal_id=ctx.get("reuse_proposal_id"),
         requirement_restated=f"Unclear — {why}. A human needs to read this one.",
         requester=proposals.Requester(),
         classification=proposals.ESCALATE, confidence=0.0,
@@ -86,7 +88,8 @@ def never_touch_gate(ctx):
         return
     categories = sorted({h["category"] for h in hits})
     _decide(ctx, _w()._new_proposal(
-        ctx["issue"], requirement_restated=ctx["restated"],
+        ctx["issue"], proposal_id=ctx.get("reuse_proposal_id"),
+        requirement_restated=ctx["restated"],
         requester=proposals.Requester(),
         classification=proposals.ESCALATE, confidence=0.0,
         flags=["never_touch"] + [f"never_touch:{c}" for c in categories]
@@ -104,7 +107,8 @@ def fixed_route_gate(ctx):
     route = _w().fixed_route(ctx["issue"])
     if not route:
         return
-    _decide(ctx, _w().routed_proposal(ctx["issue"], ctx["restated"], route),
+    _decide(ctx, _w().routed_proposal(ctx["issue"], ctx["restated"], route,
+                                      proposal_id=ctx.get("reuse_proposal_id")),
             ledger_mod.PROPOSED, f"fixed route: {route['name']}")
 
 
@@ -131,7 +135,8 @@ def duplicate_gate(ctx):
         return
     top, requester = found[0], ctx["requester"]
     _decide(ctx, _w()._new_proposal(
-        ctx["issue"], requirement_restated=ctx["restated"],
+        ctx["issue"], proposal_id=ctx.get("reuse_proposal_id"),
+        requirement_restated=ctx["restated"],
         requester=proposals.Requester(**requester.to_dict()),
         classification=proposals.DUPLICATE,
         confidence=round(float(top.get("similarity", 0)), 2),
@@ -180,7 +185,10 @@ def assess_risk(ctx):
 
 @agent("plan_clone", READ)
 def plan_clone(ctx):
-    """For NEEDS_CODE: the PRDT clone — assignee shortlist, priority, brief."""
+    """For NEEDS_CODE: the PRDT clone — assignee shortlist, priority, brief.
+    config/boards.yml `assignee_overrides` forces a known-correct developer
+    without skipping the research or comment that produced -- see
+    worker.assignee_override."""
     from agents.jira_leader import analysis as analysis_mod, description as description_mod
 
     analysis = ctx["analysis"]
@@ -188,27 +196,37 @@ def plan_clone(ctx):
     if analysis.classification != proposals.NEEDS_CODE:
         return
     issue, research, flags = ctx["issue"], ctx["research"], ctx["flags"]
-    candidates = ctx["historian"].assignee_candidates(
+    override = _w().assignee_override(issue)
+    candidates = [] if override else ctx["historian"].assignee_candidates(
         f"{ctx['summary']} {ctx['description']}", labels=analysis.labels,
         components=research.components)
     first = candidates[0] if candidates else None
     priority, priority_why, priority_flags = analysis_mod.clone_priority(issue)
     flags.extend(priority_flags)
     LOG.info("worker.priority", ticket=ctx["key"], priority=priority, why=priority_why)
+    if override:
+        assignee = override["assignee"]
+        assignee_reason = f"assignee override '{override['name']}' (config/boards.yml)"
+        assignee_alternates = [override["assignee"]]
+        labels = list(override.get("labels") or analysis.labels)
+        flags.append(f"assignee_override:{override['name']}")
+    else:
+        assignee = first["assignee"] if first else None
+        assignee_reason = first["reason"] if first else ""
+        assignee_alternates = ([c["assignee"] for c in candidates[1:]] or
+                               ([first["assignee"]] if first else ["unassigned"]))
+        labels = analysis.labels
+        if not candidates:
+            flags.append("no_assignee_candidate")
     ctx["clone"] = proposals.Clone(
         target_project=config.dev_project(),
         summary=analysis.clone_summary or ctx["summary"],
         description=description_mod.build(issue, research, analysis, ctx["requester"]),
-        assignee=first["assignee"] if first else None,
-        assignee_reason=first["reason"] if first else "",
-        assignee_alternates=[c["assignee"] for c in candidates[1:]] or
-                            ([first["assignee"]] if first else ["unassigned"]),
-        labels=analysis.labels,
+        assignee=assignee, assignee_reason=assignee_reason,
+        assignee_alternates=assignee_alternates, labels=labels,
         priority=priority,
         link_type=config.boards()["development"]["link_type"])
     ctx["transition"] = config.boards()["intake"]["dev_transition"]
-    if not candidates:
-        flags.append("no_assignee_candidate")
 
 
 @agent("draft_proposal", LOCAL)
@@ -216,7 +234,8 @@ def draft_proposal(ctx):
     """Assemble, validate and store the proposal; ledger -> PROPOSED."""
     analysis, requester, fields = ctx["analysis"], ctx["requester"], ctx["fields"]
     proposal = _w()._new_proposal(
-        ctx["issue"], requirement_restated=analysis.requirement_restated or ctx["restated"],
+        ctx["issue"], proposal_id=ctx.get("reuse_proposal_id"),
+        requirement_restated=analysis.requirement_restated or ctx["restated"],
         requester=proposals.Requester(**requester.to_dict()),
         classification=analysis.classification,
         confidence=analysis.confidence,

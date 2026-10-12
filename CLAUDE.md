@@ -142,6 +142,7 @@ mirror, daily-report); manual runs are dry-run unless `--execute`.
 | daily-report | 09:00 | check_health → build_brief → assemble_report → render_report → save_report → send_report (only if Gmail is configured) |
 | rules | Mon 08:30 | cluster_corrections → write_rule_proposals |
 | housekeeping | hourly | rotate_logs → prune_run_history |
+| retriage | human (a rule changed) | load_for_retriage → claim_for_retriage → run_triage → record_retriage_correction |
 
 `python -m flows list | show <flow> | run <flow> [--execute] [--confirm] | tick |
 status | runs`. The old module CLIs (`queue run`, `labels poll`, `batch execute`,

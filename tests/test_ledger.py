@@ -19,6 +19,20 @@ class LedgerTests(unittest.TestCase):
                 led.transition("PESD1-1", L.EXECUTED, clone_key="PRDT-1")
                 self.assertTrue(led.is_executed("PESD1-1"))
 
+    def test_proposed_can_be_reclaimed_for_retriage_but_not_skip_to_executed(self):
+        """The one edge the retriage flow needed, added 12 Oct 2026: a human
+        re-triaging a ticket because a rule changed, not its content."""
+        from core import ledger as L
+        with sandbox():
+            with L.Ledger() as led:
+                led.upsert_new("PESD1-3", "h")
+                led.claim("PESD1-3", "h")
+                led.transition("PESD1-3", L.PROPOSED, proposal_id="p_0001")
+                led.transition("PESD1-3", L.CLAIMED)
+                self.assertEqual(led.get("PESD1-3")["state"], L.CLAIMED)
+                with self.assertRaises(L.LedgerError):
+                    led.transition("PESD1-3", L.EXECUTED)  # still must go via PROPOSED/APPROVED
+
     def test_executed_is_terminal_except_rollback(self):
         from core import ledger as L
         with sandbox():

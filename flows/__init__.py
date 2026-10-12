@@ -19,7 +19,7 @@ from core.flow import Flow
 
 #: Module names under flows/, in the order `list` shows them.
 MODULES = ("intake", "decisions", "execute", "mirror", "research", "corpus",
-           "content", "escalation", "report", "housekeeping")
+           "content", "escalation", "report", "housekeeping", "retriage")
 
 
 def registry() -> dict[str, Flow]:
