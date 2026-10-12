@@ -13,6 +13,10 @@ with a trigger (CLAUDE.md > Architecture). On the branch, not yet live:
 * New behaviour: `rules` now actually runs weekly (Mon 08:30, proposals only);
   `confluence` refreshes weekly (Mon 07:00, read-only); research runs every
   15m instead of every 5m; mirror moves are journalled in `execution_log`.
+* Merged with `main` (Digital Twin). The Twin reads 6 Slack channels, so on
+  12 Oct the board owner chose to keep `core/slack_client.py` as a **read-only**
+  client for it: no write client, an allowlist of read methods, and
+  `tests/test_slack_read_only.py` guarding both. The Slack Leader stays removed.
 * `make demo` claims nothing, and did before this branch: it reads the live
   `config/boards.yml` (open status "Waiting Support") against fixtures marked
   "Waiting for Support". The tests use fixture boards and are unaffected.
