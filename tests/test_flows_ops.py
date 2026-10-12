@@ -52,11 +52,53 @@ class DailyReportTests(unittest.TestCase):
         from agents.chief_of_staff import health
 
         with sandbox(), fixture_boards():
-            fl = health.flows()
-            self.assertTrue(fl["intake"]["overdue"])         # never ran
-            self.assertNotIn("execute", fl)                  # human-only: no schedule
+            self.assertFalse(health.flows()["intake"]["overdue"])   # scheduler not started
+            self.assertNotIn("execute", health.flows())             # human-only: no schedule
             scheduler.run_flow(HOUSEKEEPING)
             self.assertFalse(health.flows()["housekeeping"]["overdue"])
+
+    def _age_scheduler(self, hours):
+        """Pretend the scheduler's first run was `hours` ago."""
+        with scheduler.Store() as store:
+            rid = store.start_run("housekeeping", "schedule")
+            store.conn.execute("UPDATE flow_runs SET started = ?, ok = 1 WHERE id = ?",
+                               ((dt.datetime.now(dt.timezone.utc)
+                                 - dt.timedelta(hours=hours)).isoformat(), rid))
+
+    def test_a_weekly_flow_is_not_overdue_in_its_first_week(self):
+        from agents.chief_of_staff import health
+
+        with sandbox(), fixture_boards():
+            self._age_scheduler(hours=24)
+            fl = health.flows()
+            self.assertFalse(fl["confluence"]["overdue"])   # weekly: allowed a week
+            self.assertFalse(fl["rules"]["overdue"])
+            self.assertTrue(fl["intake"]["overdue"])        # every 5m: 15m allowance
+
+    def test_never_run_weekly_flow_is_overdue_after_its_week(self):
+        from agents.chief_of_staff import health
+
+        with sandbox(), fixture_boards():
+            self._age_scheduler(hours=24 * 8)
+            self.assertTrue(health.flows()["confluence"]["overdue"])
+
+    def test_a_running_flow_is_not_overdue(self):
+        from agents.chief_of_staff import health
+
+        with sandbox(), fixture_boards():
+            self._age_scheduler(hours=24 * 3)
+            with scheduler.Store() as store:
+                store.acquire(DAILY_REPORT, "me")
+            self.assertFalse(health.flows()["daily-report"]["overdue"])
+
+    def test_daily_report_does_not_call_itself_overdue(self):
+        with sandbox(), fixture_boards(), \
+                patch("agents.chief_of_staff.health.launchd", return_value={}), \
+                patch("core.mailer.configured", return_value=False):
+            self._age_scheduler(hours=24 * 3)
+            res = scheduler.run_flow(DAILY_REPORT, trigger="schedule")
+            self.assertNotIn("daily-report", res.data["report"].split("FLOWS", 1)[1]
+                             .split("\n", 1)[0])
 
 
 class CorpusTests(unittest.TestCase):
