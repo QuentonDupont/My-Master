@@ -44,6 +44,42 @@ approve in batches.
 
 ---
 
+## NetSuite: create a new NCG item
+
+*Looks like:* "Request to create new NCG item: `<name>` (`S_NCGxxxx`)" —
+the current intake form's wording (PESD1-11326/27/28/33/34, 28 Sep–9 Oct
+2026). Older tickets used "Request to Create New SKU – S_NCGxxxx"; don't
+widen the match to that, or to "NCG" generally — PESD1-10877 "Unable to
+Process Receipts for NCG Transfer Orders" is a different problem that
+happens to share the word.
+
+**This is a known route, not a NEEDS_CODE guess** (`config/boards.yml`
+`assignee_overrides`, applied inside `plan_clone`): the developer is always
+**Vishal Gaikwad**, under epic PRDT-10732 "NetSuite Support Tickets",
+labels `netsuite` + `ncg`. Unlike the Crashlytics fixed route, this does
+**not** skip research or the drafted comment — every NCG request has its
+own missing details to ask about before anything is created:
+
+1. The cost to set (purchase cost) — never given in the ticket itself.
+2. Whether a quantity like "50 pcs" is a pack size or the unit of measure
+   (precedent S_NCG0136 used Pieces as the unit).
+3. The subsidiary (e.g. S_NCG0136 specified "Singapore (USD), Include
+   Children" — not assumed).
+4. Any dimension or size that repeats verbatim across two tickets in the
+   same batch (PESD1-11333/11334 both said "30CM x 37CM x 15CM" for a
+   "Big Size" and a standard bag — ask, don't assume a copy-paste error).
+
+**Verify:** search the new item code in NetSuite and record the internal
+ID (Vishal's comments always state it, e.g. "Netsuite InternalId
+-2265324") — then confirm with the requester it appears in their NCG list.
+PESD1-10667/S_NCG0140 shows why: Quenton said "completed," but the
+requester couldn't find the item until a screenshot proved it.
+
+**Housekeeping:** PESD1-11326/PRDT-11780 (S_NCG0144) was confirmed created
+by Vishal but is still sitting To Do as of 12 Oct 2026 — close the loop.
+
+---
+
 ## NetSuite: Inventory Detail / bin missing on an Item Receipt (IR)
 
 *Looks like:* "Please edit/correct the inventory details field IR:xxxx /

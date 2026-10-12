@@ -54,9 +54,13 @@ def unreadable_detail(issue: dict) -> str | None:
     return None
 
 
-def _new_proposal(issue: dict, **kw) -> proposals.Proposal:
+def _new_proposal(issue: dict, *, proposal_id: str | None = None,
+                  **kw) -> proposals.Proposal:
+    """`proposal_id` is mint-a-new-one by default. The retriage flow passes
+    the ticket's existing id so correcting a proposal replaces it in place
+    rather than leaving the old one as an orphan file."""
     return proposals.Proposal(
-        proposal_id=proposals.next_id(),
+        proposal_id=proposal_id or proposals.next_id(),
         ticket=issue["key"],
         ticket_url=config.ticket_url(issue["key"]),
         **kw,
@@ -80,13 +84,36 @@ def fixed_route(issue: dict) -> dict | None:
     return None
 
 
-def routed_proposal(issue: dict, restated: str, route: dict) -> proposals.Proposal:
+def assignee_override(issue: dict) -> dict | None:
+    """A ticket family whose correct developer is already known, without
+    skipping research, duplicate detection or the analyst's comment the way
+    `fixed_route` does.
+
+    `fixed_route` fits Crashlytics because every alert needs the exact same
+    verbatim clone and the exact same generic comment -- there is nothing to
+    research. New-NCG-item requests (config/boards.yml `assignee_overrides`)
+    are the opposite: the developer is always the same (Vishal, confirmed
+    against 5+ precedents, 28 Sep-9 Oct 2026), but each ticket needs its own
+    clarifying questions (cost, units, subsidiary), which only the normal
+    research/analyst pass can produce. This overrides the ranked assignee
+    `plan_clone` would otherwise guess, nothing else.
+    """
+    summary = (issue.get("fields", {}) or {}).get("summary") or ""
+    for override in config.boards().get("assignee_overrides") or []:
+        prefix = override.get("summary_prefix")
+        if prefix and summary.strip().lower().startswith(prefix.lower()):
+            return override
+    return None
+
+
+def routed_proposal(issue: dict, restated: str, route: dict, *,
+                    proposal_id: str | None = None) -> proposals.Proposal:
     """The proposal a fixed route produces: the clone copies the PESD1 ticket
     verbatim, labelled and assigned exactly as the route says."""
     fields = issue.get("fields", {}) or {}
     priority, _why, _flags = analysis_mod.clone_priority(issue)
     return _new_proposal(
-        issue, requirement_restated=restated,
+        issue, proposal_id=proposal_id, requirement_restated=restated,
         requester=proposals.Requester(),
         classification=proposals.NEEDS_CODE, confidence=1.0,
         proposed_comment=route["comment"],

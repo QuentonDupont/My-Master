@@ -41,7 +41,12 @@ STATES = (NEW, CLAIMED, PROPOSED, APPROVED, CORRECTED, REJECTED, EXECUTED,
 TRANSITIONS: dict[str, set[str]] = {
     NEW: {CLAIMED},
     CLAIMED: {PROPOSED, ESCALATED, DUPLICATE, NEW},
-    PROPOSED: {APPROVED, CORRECTED, REJECTED, ESCALATED},
+    # PROPOSED -> CLAIMED is the retriage flow's edge, added 12 Oct 2026: a
+    # human re-triaging a ticket because a rule changed, not because its
+    # content did (invariant 4 governs the standing sweep, not this). Every
+    # other way into CLAIMED already exists for the same reason -- REJECTED,
+    # ESCALATED and DUPLICATE below are a human re-opening a decided ticket.
+    PROPOSED: {APPROVED, CORRECTED, REJECTED, ESCALATED, CLAIMED},
     APPROVED: {EXECUTED, REJECTED, ESCALATED},
     CORRECTED: {EXECUTED, REJECTED, ESCALATED},
     REJECTED: {CLAIMED},

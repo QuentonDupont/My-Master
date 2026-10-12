@@ -1,4 +1,4 @@
-.PHONY: help test flows flow flows-status flows-runs flows-tick flows-install flows-rollback execute demo demo-reset queue batch brief rules clean mirror mirror-apply labels tick tick-install corpus-refresh corpus-refresh-install mcp connector-install connector-url twin twin-setup twin-morning twin-eod twin-export twin-alerts
+.PHONY: help test flows flow flows-status flows-runs flows-tick flows-install flows-rollback execute retriage demo demo-reset queue batch brief rules clean mirror mirror-apply labels tick tick-install corpus-refresh corpus-refresh-install mcp connector-install connector-url twin twin-setup twin-morning twin-eod twin-export twin-alerts
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -73,6 +73,9 @@ flows-rollback:  ## back to the old per-job launchd schedules
 
 execute:  ## carry out approved proposals: dry run; EXEC=--execute to write to Jira
 	python3 -m flows run execute --confirm $(EXEC)
+
+retriage:  ## re-run triage on one ticket because a rule changed (TICKET=PESD1-x REASON="...")
+	python3 -m flows run retriage --confirm --data '{"ticket": "$(TICKET)", "reason": "$(REASON)"}'
 
 tick:  ## legacy: one board pass via the old shell script (rollback only)
 	./tools/board_tick.sh

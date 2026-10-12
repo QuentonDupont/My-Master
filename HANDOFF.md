@@ -18,6 +18,22 @@ with a trigger (CLAUDE.md > Architecture). On the branch, not yet live:
 * **Daily report goes to a file, not email** (board owner's choice, 12 Oct):
   `review/daily_reports/<date>.md`. `send_report` skips while no Gmail
   credentials are set; `tools/gmail_oauth_setup.py` turns emailing back on.
+* **New flow: `retriage`** (12 Oct 2026) — re-run triage on one named ticket
+  by hand, because a rule changed, not because the ticket did. Built after
+  three one-off scripts corrected stored proposals that day (Crashlytics x2,
+  six return tickets) with no proper path to do it. Human-triggered only:
+  `make retriage TICKET=PESD1-x REASON="..."`. Needed one new ledger edge,
+  `PROPOSED -> CLAIMED` (core/ledger.py), alongside the three that already
+  existed for the same reason (REJECTED/ESCALATED/DUPLICATE -> CLAIMED).
+* **New mechanism: `assignee_overrides`** (12 Oct 2026), distinct from
+  `fixed_routes` — a known-correct developer for a ticket family, without
+  skipping research or the drafted comment the way Crashlytics does. One
+  entry live: new-NCG-item requests always go to Vishal Gaikwad. Checked a
+  Superset/data-engineering route too (requests like PESD1-11332) and did
+  **not** build one — `text ~ "Superset"` pulls in RMA-sync tickets and
+  others with nothing to do with data engineering, and only one real
+  precedent (11332) exists so far. Not enough signal to write a safe rule;
+  said so rather than forcing one.
 * New behaviour: `rules` now actually runs weekly (Mon 08:30, proposals only);
   `confluence` refreshes weekly (Mon 07:00, read-only); research runs every
   15m instead of every 5m; mirror moves are journalled in `execution_log`.
