@@ -2,8 +2,8 @@
 
 CLAUDE.md's worker loop, one agent per step:
 
-    read_ticket -> sanity_gate -> never_touch_gate -> research ->
-    resolve_requester -> duplicate_gate -> classify -> assess_risk ->
+    read_ticket -> sanity_gate -> never_touch_gate -> fixed_route_gate ->
+    research -> resolve_requester -> duplicate_gate -> classify -> assess_risk ->
     plan_clone -> draft_proposal
 
 The gates end the flow early with the ticket's outcome already recorded
@@ -92,6 +92,20 @@ def never_touch_gate(ctx):
         flags=["never_touch"] + [f"never_touch:{c}" for c in categories]
               + ["requester_unknown"]),
         ledger_mod.ESCALATED, f"never-touch: {', '.join(categories)}")
+
+
+@agent("fixed_route_gate", LOCAL)
+def fixed_route_gate(ctx):
+    """A ticket family the board owner has already decided how to handle
+    (config/boards.yml fixed_routes, e.g. every Crashlytics alert to Rahul)
+    skips research, requester lookup and classification entirely — the clone
+    copies the ticket verbatim. Runs before the duplicate check: each alert is
+    its own crash, however alike the summaries look."""
+    route = _w().fixed_route(ctx["issue"])
+    if not route:
+        return
+    _decide(ctx, _w().routed_proposal(ctx["issue"], ctx["restated"], route),
+            ledger_mod.PROPOSED, f"fixed route: {route['name']}")
 
 
 @agent("research", READ)
@@ -244,8 +258,9 @@ def close_resources(ctx) -> None:
 
 TRIAGE = Flow(
     "triage",
-    [read_ticket, sanity_gate, never_touch_gate, research, resolve_requester,
-     duplicate_gate, classify, assess_risk, plan_clone, draft_proposal],
+    [read_ticket, sanity_gate, never_touch_gate, fixed_route_gate, research,
+     resolve_requester, duplicate_gate, classify, assess_risk, plan_clone,
+     draft_proposal],
     doc="One claimed ticket -> one proposal (or an escalation / duplicate). No Jira writes.",
     on_failure=release_ticket,
     cleanup=close_resources,
