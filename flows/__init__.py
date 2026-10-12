@@ -18,7 +18,7 @@ import importlib
 from core.flow import Flow
 
 #: Module names under flows/, in the order `list` shows them.
-MODULES = ()
+MODULES = ("intake", "decisions", "execute", "mirror", "research")
 
 
 def registry() -> dict[str, Flow]:

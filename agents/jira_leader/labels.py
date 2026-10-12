@@ -31,8 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from agents.jira_leader import mobile as mobile_mod
-from core import config, ledger as ledger_mod, log
+from core import ledger as ledger_mod, log
 
 LOG = log.get("labels")
 
@@ -93,19 +92,16 @@ def pending(reader, led: ledger_mod.Ledger | None = None) -> list[dict]:
 
 def poll(reader, led: ledger_mod.Ledger | None = None,
          apply: bool = False) -> dict:
-    """Find labelled tickets and, with `apply`, record their decisions."""
-    found = pending(reader, led)
-    decisions = [d for d in found if d["decision"] in ("approve", "reject")]
-    conflicts = [d for d in found if d["decision"] == "conflict"]
-    result = {"found": len(found), "conflicts": conflicts,
-              "decisions": decisions, "applied": None}
-    if apply and decisions:
-        result["applied"] = mobile_mod.apply(
-            [{"proposal_id": d["proposal_id"], "decision": d["decision"],
-              "note": d["note"]} for d in decisions], led=led)
-    LOG.info("labels.poll", found=len(found), conflicts=len(conflicts),
-             applied=bool(apply and decisions))
-    return result
+    """Find labelled tickets and, with `apply`, record their decisions.
+
+    The work is the decisions flow (flows/decisions.py)."""
+    from core.flow import Context
+    from flows.decisions import DECISIONS
+
+    result = DECISIONS.run(Context("decisions", execute=apply,
+                                   data={"reader": reader, "led": led}))
+    result.raise_for_error()
+    return result.data["report"]
 
 
 def main(argv: list[str] | None = None) -> int:

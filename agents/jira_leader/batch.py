@@ -191,27 +191,17 @@ def apply(batch_path: Path | str, led: ledger_mod.Ledger | None = None) -> dict:
 
 def execute_approved(*, execute: bool = False,
                      led: ledger_mod.Ledger | None = None) -> list[dict]:
-    """Hand every approved/corrected proposal to the single write path."""
-    from core.execute import ExecutionRefused, execute_proposal
+    """Hand every approved/corrected proposal to the single write path.
 
-    own = led is None
-    led = led or ledger_mod.Ledger()
-    try:
-        results = []
-        for row in led.by_state(ledger_mod.APPROVED, ledger_mod.CORRECTED):
-            pid = row["proposal_id"]
-            if not pid:
-                continue
-            try:
-                res = execute_proposal(pid, execute=execute, ledger=led)
-                results.append(res.to_dict())
-            except ExecutionRefused as exc:
-                LOG.warn("batch.execute_refused", proposal=pid, reason=str(exc))
-                results.append({"proposal_id": pid, "ok": False, "refused": str(exc)})
-        return results
-    finally:
-        if own:
-            led.close()
+    The work is the execute flow (flows/execute.py). Calling this IS the human
+    confirm: it is only reached from `batch execute` and the MCP execute tool."""
+    from core.flow import Context
+    from flows.execute import EXECUTE
+
+    result = EXECUTE.run(Context("execute", trigger="human", execute=execute,
+                                 data={"led": led}))
+    result.raise_for_error()
+    return result.data["report"]
 
 
 def main(argv: list[str] | None = None) -> int:

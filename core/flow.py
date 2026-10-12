@@ -162,6 +162,8 @@ class ForEach:
     seed: Callable[["Context", Any], dict]
     collect: str = "results"
     max_workers: int = 1
+    #: Optional ctx key that, when set, overrides max_workers for this run.
+    workers_from: str | None = None
 
     @property
     def agents(self) -> list[Agent]:
@@ -225,6 +227,16 @@ class RunResult:
     stopped: str | None = None
     error: str | None = None
     data: dict = field(default_factory=dict)
+    #: The exception that stopped the flow, so a wrapper can re-raise it as is.
+    exc: BaseException | None = field(default=None, repr=False)
+
+    def raise_for_error(self) -> None:
+        """Re-raise a failure that stopped the flow. A step that failed with
+        on_error="continue" did not stop it: callers read `errors` for those."""
+        if self.exc is not None:
+            raise self.exc
+        if self.error:
+            raise RuntimeError(self.error)
 
     @property
     def errors(self) -> list[str]:
@@ -255,6 +267,9 @@ class Flow:
     on_failure: Callable[[Context, BaseException], None] | None = None
     #: A run older than this is presumed dead and its lock can be taken over.
     timeout_seconds: int = 1800
+    #: Always called with ctx after the last step — success, stop or failure.
+    #: Where an agent that opened a connection gets it closed.
+    cleanup: Callable[[Context], None] | None = None
 
     def __post_init__(self) -> None:
         self.steps = [_as_step(s) for s in self.steps]
@@ -319,6 +334,7 @@ class Flow:
                     continue
                 result.ok = False
                 result.error = f"{name}: {exc}"
+                result.exc = exc
                 if self.on_failure:
                     try:
                         self.on_failure(ctx, exc)
@@ -328,6 +344,11 @@ class Flow:
                 break
             else:
                 result.steps.append(StepResult(name, True, _ms(started)))
+        if self.cleanup:
+            try:
+                self.cleanup(ctx)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOG.error("flow.cleanup_failed", flow=self.name, error=str(exc)[:500])
         LOG.info("flow.done", flow=self.name, ok=result.ok, stopped=result.stopped,
                  errors=result.errors)
         return result
@@ -345,7 +366,8 @@ class Flow:
             res = step.flow.run(sub)
             return dict(res.data, _ok=res.ok, _stopped=res.stopped, _error=res.error)
 
-        workers = max(1, min(step.max_workers, len(items)))
+        width = ctx.get(step.workers_from) if step.workers_from else None
+        workers = max(1, min(int(width or step.max_workers), len(items)))
         if workers == 1:
             collected.extend(one(i) for i in items)
             return

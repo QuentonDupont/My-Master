@@ -13,7 +13,6 @@ import json
 import re
 from pathlib import Path
 
-from agents.historian.retrieval import Historian
 from agents.jira_leader import analysis
 from agents.jira_leader.gates import never_touch, restate
 from agents.jira_leader.sources import FileTicketSource, FIELDS
@@ -134,55 +133,90 @@ def render_report(packets: list[dict], errors: list[dict]) -> str:
             + '<p>' + html.escape(json.dumps(errors)) + '</p>' + ''.join(cards) + '</html>')
 
 
-def run(issues: list[dict], *, sheet: list[dict], output: Path, historian=None, analyst=None) -> dict:
-    output.mkdir(parents=True, exist_ok=True, mode=0o700)
-    output.chmod(0o700)
-    own_hist = historian is None
-    historian = historian or Historian()
-    analyst = analyst or analysis.get_analyst()
+def plan_tickets(issues: list[dict], *, sheet: list[dict], output: Path,
+                 historian, analyst) -> tuple[list[dict], list[dict]]:
+    """A research packet per ticket, reusing the cached one while nothing changed."""
     packets, errors = [], []
     sheet_hash = digest(sheet)
-    try:
-        for issue in issues:
-            key = assert_key_allowed(issue["key"])
-            path = output / "tickets" / f"{key}.json"
-            fingerprint = digest({"version": VERSION, "issue": issue, "sheet": sheet_hash,
-                                  "rules": analysis.load_rules(), "analyst": analyst.name,
-                                  "corpus_mtime": config.CORPUS_DB.stat().st_mtime_ns if config.CORPUS_DB.exists() else None})
-            try:
-                old = json.loads(path.read_text()) if path.exists() else {}
-                if old.get("fingerprint") == fingerprint:
-                    packet = old
-                else:
-                    packet = plan_ticket(issue, sheet, historian, analyst)
-                    packet["fingerprint"] = fingerprint
-                    write_json(path, packet)
-                packets.append(packet)
-            except Exception as exc:
-                errors.append({"ticket": key, "error": str(exc)})
-    finally:
-        if own_hist:
-            historian.close()
+    for issue in issues:
+        key = assert_key_allowed(issue["key"])
+        path = output / "tickets" / f"{key}.json"
+        fingerprint = digest({"version": VERSION, "issue": issue, "sheet": sheet_hash,
+                              "rules": analysis.load_rules(), "analyst": analyst.name,
+                              "corpus_mtime": config.CORPUS_DB.stat().st_mtime_ns if config.CORPUS_DB.exists() else None})
+        try:
+            old = json.loads(path.read_text()) if path.exists() else {}
+            if old.get("fingerprint") == fingerprint:
+                packet = old
+            else:
+                packet = plan_ticket(issue, sheet, historian, analyst)
+                packet["fingerprint"] = fingerprint
+                write_json(path, packet)
+            packets.append(packet)
+        except Exception as exc:
+            errors.append({"ticket": key, "error": str(exc)})
+    return packets, errors
+
+
+def build_outbox(packets: list[dict]) -> list[dict]:
+    """One requester draft per verified email, grouping that person's tickets."""
     grouped: dict[str, list[dict]] = {}
     for p in packets:
         if p.get("slack_draft"):
             grouped.setdefault(p["slack_draft"]["email"], []).append(p)
-    outbox = [{"email": email, "tickets": [p["ticket"] for p in group],
-               "message": "\n\n".join(p["slack_draft"]["text"] for p in group),
-               "status": "READY_FOR_SLACK_LOOKUP", "sent": False} for email, group in sorted(grouped.items())]
+    return [{"email": email, "tickets": [p["ticket"] for p in group],
+             "message": "\n\n".join(p["slack_draft"]["text"] for p in group),
+             "status": "READY_FOR_SLACK_LOOKUP", "sent": False}
+            for email, group in sorted(grouped.items())]
+
+
+def write_review(output: Path, packets: list[dict], errors: list[dict],
+                 outbox: list[dict], sheet: list[dict], analyst_name: str) -> dict:
+    """outbox.json, summary.json and the index.html report; returns the summary."""
     summary = {"tickets": len(packets), "escalations": sum(p["classification"] == "ESCALATE" for p in packets),
                "requesters_verified": sum(p["requester"]["confidence"] == "high" for p in packets),
                "email_updates_proposed": sum(bool(p.get("email_update")) for p in packets),
                "slack_drafts_prepared": len(outbox), "sheet_rows": len(sheet),
-               "analyst": analyst.name, "errors": errors, "output": str(output),
+               "analyst": analyst_name, "errors": errors, "output": str(output),
                "blockers": ([] if sheet else ["Requester sheet CSV is unavailable or empty"])
-                           + (["LLM analyst is unavailable; research uses the heuristic"] if analyst.name == "heuristic" else [])}
+                           + (["LLM analyst is unavailable; research uses the heuristic"] if analyst_name == "heuristic" else [])}
     write_json(output / "outbox.json", outbox)
     write_json(output / "summary.json", summary)
     report = output / "index.html"
     report.write_text(render_report(packets, errors), encoding="utf-8")
     report.chmod(0o600)
     return summary
+
+
+def fetch_open_work(client=None) -> list[dict]:
+    """Open intake tickets with their comments and linked development tickets."""
+    client = client or JiraReadClient()
+    field_id = config.boards()["intake"].get("requester_email_field")
+    issues = client.board_issues(381,
+        jql=f'project = {config.intake_project()} AND status in ("Waiting Support", "Blocked", "Waiting for customer")',
+        fields=FIELDS + ["issuelinks"] + ([field_id] if field_id else []))
+    for issue in issues:
+        issue["fields"]["comment"] = {"comments": client.comments(issue["key"])}
+        linked = []
+        for link in issue["fields"].get("issuelinks", []):
+            target = link.get("inwardIssue") or link.get("outwardIssue") or {}
+            key = target.get("key", "")
+            if key.startswith(config.dev_project() + "-"):
+                dev = client.issue(key, fields="summary,status,comment,updated")
+                dev["fields"]["comment"] = {"comments": client.comments(key)}
+                linked.append(dev)
+        issue["_linked_development"] = linked
+    return issues
+
+
+def run(issues: list[dict], *, sheet: list[dict], output: Path, historian=None, analyst=None) -> dict:
+    """Research the given tickets. The work is the research flow (flows/research.py)."""
+    from flows.research import RESEARCH
+
+    result = RESEARCH.run(issues=issues, sheet=sheet, output=output,
+                          historian=historian, analyst=analyst)
+    result.raise_for_error()
+    return result.data["report"]
 
 
 def main(argv=None) -> int:
@@ -196,22 +230,7 @@ def main(argv=None) -> int:
     if args.file:
         issues = FileTicketSource(args.file).open_tickets()
     else:
-        client = JiraReadClient()
-        field_id = config.boards()["intake"].get("requester_email_field")
-        issues = client.board_issues(381,
-            jql=f'project = {config.intake_project()} AND status in ("Waiting Support", "Blocked", "Waiting for customer")',
-            fields=FIELDS + ["issuelinks"] + ([field_id] if field_id else []))
-        for issue in issues:
-            issue["fields"]["comment"] = {"comments": client.comments(issue["key"])}
-            linked = []
-            for link in issue["fields"].get("issuelinks", []):
-                target = link.get("inwardIssue") or link.get("outwardIssue") or {}
-                key = target.get("key", "")
-                if key.startswith(config.dev_project() + "-"):
-                    dev = client.issue(key, fields="summary,status,comment,updated")
-                    dev["fields"]["comment"] = {"comments": client.comments(key)}
-                    linked.append(dev)
-            issue["_linked_development"] = linked
+        issues = fetch_open_work()
     summary = run(issues, sheet=requester.load_sheet(args.sheet), output=args.output, analyst=analyst)
     print(json.dumps(summary, indent=2))
     return 1 if summary["errors"] else 0
