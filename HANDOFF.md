@@ -164,3 +164,13 @@ keyword heuristics today.
 https://claude.ai/artifact/UBNzgPpL7W16vZVh4a8m2k — proposals,
 close recommendations and board priorities. Seeded with
 `python -m agents.jira_leader.mobile export` and the Artifact db tools.
+
+## Connector writes outside the ledger (undo record)
+
+- **16 Oct 2026, PESD1-11347**, approved in chat by the board owner ("approved, use the api label epic"):
+  created PRDT-11802 (Story, Critical, assignee Daniel Goncalves, label `api`,
+  epic PRDT-10842, Department = Technology); fix-brief comment 284556 on
+  PRDT-11802; requester comment 284557 on PESD1-11347; Cloners link
+  PRDT-11802 clones PESD1-11347; PESD1-11347 moved to To Do via transition
+  11 "Submit to Dev". To undo: close PRDT-11802 as Won't Do (never delete),
+  move PESD1-11347 back to Waiting Support, edit comment 284557.
