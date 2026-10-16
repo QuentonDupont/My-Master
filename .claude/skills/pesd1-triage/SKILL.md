@@ -30,7 +30,8 @@ drafting anything. Run this after the gates below pass.
    Vishal for NetSuite, Wallop for Apollo) are the dev handover: root cause,
    the table, field or script, and whether the issue will come back. There
    is no single handover document; the 2022–23 "Handover" pages in PM are
-   historical.
+   historical. Who owns which area, and the standing routing rules, are in the
+   `jira-people` skill. Load it before choosing an assignee.
 4. **Confluence SOPs.** Search OP (operations procedures), PSD, PM ("TechOps
    SOP", "Henry Revamp project"), NEON (inventory sync) and MUL. A written
    procedure beats inferring one from how a ticket happened to be closed.
