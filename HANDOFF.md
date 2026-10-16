@@ -174,3 +174,12 @@ close recommendations and board priorities. Seeded with
   PRDT-11802 clones PESD1-11347; PESD1-11347 moved to To Do via transition
   11 "Submit to Dev". To undo: close PRDT-11802 as Won't Do (never delete),
   move PESD1-11347 back to Waiting Support, edit comment 284557.
+
+- **16 Oct 2026, Pomelo Intelligence Hub (Henry Partner Portal)**, approved in chat ("yes to all please create"):
+  created BUSK-2851 (Epic, feature, assignee Quenton) with the mockup V6.2 HTML
+  attached; PRDT-11804 (Epic, container, relates to BUSK-2851 because PRDT
+  requires an Epic Link on every Story and cannot take a team-managed BUSK epic);
+  29 Stories PRDT-11805, PRDT-11810 to PRDT-11837 under PRDT-11804; 64 Sub-tasks
+  PRDT-11806 to PRDT-11809 and PRDT-11838 to PRDT-11897. Unni on Phase 1 and 2,
+  Quenton on [PM] decision sub-tasks, Phase 3 / cross-cutting / needs-spec
+  unassigned. To undo: close all as Won't Do (never delete), newest first.
