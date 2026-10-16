@@ -1,3 +1,27 @@
+# Handoff — 16 Oct 2026: PDP voucher iOS tickets (connector writes)
+
+Created by hand at the board owner's explicit request, through the Atlassian
+connector (not `execute_proposal`, so not in the ledger). Verified by reading back.
+All assigned to Hitesh (hitesh.b, iOS), epic PRDT-1976, Department Technology,
+labels `ios` + `pdp-voucher`. PRDT requires Department and Epic Link on create.
+
+| PRDT | Item | Status |
+|---|---|---|
+| 11912 | remove the dash from the sticky view | In progress |
+| 11913 | remove the space above the Pomelo tile (sticky view) | To Do |
+| 11914 | voucher code after title in Best Price Card (min spend) | To Do |
+| 11915 | grey background matching Free Delivery | Ready To Release |
+| 11916 | replace (i) icon with > arrow | Ready To Release |
+| 11917 | details sheet: code after the title | Ready To Release |
+| 11918 | details sheet: reduce cell height | Ready To Release |
+| 11919 | details sheet: remove top-right close button | Ready To Release |
+| 11920 | details sheet: collapsed by default | Ready To Release |
+
+"Done" was mapped to Ready To Release (PRDT has no "Done"; Live would claim it
+shipped). Move to Live once released. Same day: PESD1 Waiting Support sweep found
+all 11 already triaged by the farm; the Crashlytics clones for 11344/11345 and the
+11323 comment are still unapproved.
+
 # Handoff — 12 Oct 2026: flows refactor (branch `refactor/agentic-flows`)
 
 Everything recurring is now single-purpose agents chained into flows, each
