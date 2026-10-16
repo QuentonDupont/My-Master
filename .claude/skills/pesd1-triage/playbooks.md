@@ -314,6 +314,35 @@ reopening RMAs by hand every time it happens.
 
 ---
 
+## Apollo: marketplace return stuck on "Return Expired", should be "Return Received"
+
+*Looks like:* "change RMA status from return expired to return received on
+Apollo", usually Zalora MY, with a sheet of RMA numbers (PESD1-11339, 16 Oct 2026;
+earlier PESD1-11135, 11243, 11279). The warehouse received the parcel but did not
+mark it in time, and the daily expiry job (employee 518 Multivac, about 90 days
+after creation) moved it to state 9.
+
+**Why Apollo's screen cannot do it:** `order_return_state_validation` only allows
+9 -> 2 (Waiting for Package). 9 -> 3 is refused unless the user is a super admin.
+**Fix:** a reviewed SQL script run by Quenton, in the style of
+`outputs/spanky_return_deletion/delete_32_returns.sql` (temp table of ids,
+transaction, `FOR UPDATE`, guard counts, `will_apply`, COMMIT/ROLLBACK). What the
+Apollo save does for state 3, and so what the script mirrors: set
+`pml_order_return.state = 3`, insert a `pml_order_return_history` row,
+`pml_order_detail.product_quantity_return += returned qty`. It also emails the
+customer; the script does not.
+**Guards that matter:** every id still state 9, shop 20, `market_place_refund`, no
+return slip, no `ns_rma_number`, `ns_sync_status` 0, no prior state-3 history, and
+no line over its ordered quantity.
+**Decision for the owner, refund-adjacent:** normally received Zalora MY returns
+also carry `quantity_to_refund = product_quantity`, which makes the lines
+refundable in Apollo (OrderRefund / OrderSlip). The status-only ticket does not
+ask for that, so the script leaves it at 0 behind `@set_refund_qty`. Ask Finance/Ops.
+**Lookup (read-only):** Drive sheet -> `id_order_return` column; `pml_order_return`
+/ `_detail` / `_history`; NS fields are empty for these, so no NetSuite action.
+
+---
+
 ## Platform connections
 
 What we can check a ticket against, and from where. Read-only, always.
