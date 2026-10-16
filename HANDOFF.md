@@ -2,7 +2,8 @@
 
 Created by hand at the board owner's explicit request, through the Atlassian
 connector (not `execute_proposal`, so not in the ledger). Verified by reading back.
-All assigned to Hitesh (hitesh.b, iOS), epic PRDT-1976, Department Technology,
+All assigned to Hitesh (hitesh.b, iOS), under their own epic PRDT-11921 "[iOS] PDP Voucher Updates"
+(first put under PRDT-1976, moved off it at the board owner's request), Department Technology,
 labels `ios` + `pdp-voucher`. PRDT requires Department and Epic Link on create.
 
 | PRDT | Item | Status |
