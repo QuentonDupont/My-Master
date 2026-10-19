@@ -1,3 +1,23 @@
+# Handoff — 19 Oct 2026: Waiting Support sweep (connector writes)
+
+Approved by the board owner in session, executed through the connector (not
+`execute_proposal`, so none of this is in the local ledger; the ledger still
+shows these as PROPOSED). Verified by reading back. Comments are requester-visible.
+
+| PESD1 | Action | PRDT | Assignee |
+|---|---|---|---|
+| 11344 Crashlytics velocity | comment 284687 -> To Do | PRDT-11922 (Low, epic 11608) | Rahul Ravindra |
+| 11345 Crashlytics fatal | comment 284688 -> To Do | PRDT-11923 (Low, epic 11608) | Rahul Ravindra |
+| 11323 deleted returns | comment 284689 -> To Do (no SQL in comment) | — | Ops/Quenton to check RMA1424988 |
+| 11346 MC cost sync button | comment 284690 -> To Do | PRDT-11924 (High, epic 11563) | Unni Purushothaman |
+| 11348 Henry actual-colour column | comment 284691 -> To Do | PRDT-11925 (High, epic 11563) | Unni Purushothaman |
+
+11346 is not a duplicate of PESD1-11209 / PRDT-11471 (that was the cost-link bug,
+Live). Left untouched for a human: 11349 (tier upgrade, account change), 11351
+(Henry supplier data fix), 11338 and 11340 (Apollo/NetSuite manual data work),
+11332 and 11350 (owner undecided). Ledger rows for the five above should be
+reconciled to EXECUTED so the farm does not re-propose them.
+
 # Handoff — 16 Oct 2026: PDP voucher iOS tickets (connector writes)
 
 Created by hand at the board owner's explicit request, through the Atlassian
