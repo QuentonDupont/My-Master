@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 
 from agents.jira_leader import analysis
-from agents.jira_leader.gates import never_touch, restate
+from agents.jira_leader.gates import never_touch, request_text, restate
 from agents.jira_leader.sources import FileTicketSource, FIELDS
 from core import config, log, requester
 from core.jira_client import JiraReadClient, assert_key_allowed
@@ -68,7 +68,7 @@ def plan_ticket(issue: dict, sheet: list[dict], historian, analyst) -> dict:
                       steps=["Owner reviews this request and decides the permitted next action."],
                       evidence=[], analyst="gates")
         return packet
-    research = historian.research(issue["key"], fields.get("summary", ""), fields.get("description") or "")
+    research = historian.research(issue["key"], fields.get("summary", ""), request_text(fields))
     result = analyst.analyse(issue, research, requirement, analysis.load_rules())
     evidence = research.evidence()
     packet.update(classification=result.classification, confidence=result.confidence,
@@ -194,7 +194,8 @@ def fetch_open_work(client=None) -> list[dict]:
     field_id = config.boards()["intake"].get("requester_email_field")
     issues = client.board_issues(381,
         jql=f'project = {config.intake_project()} AND status in ("Waiting Support", "Blocked", "Waiting for customer")',
-        fields=FIELDS + ["issuelinks"] + ([field_id] if field_id else []))
+        fields=FIELDS + ["issuelinks"] + ([field_id] if field_id else [])
+        + list(config.boards()["intake"].get("form_fields") or {}))
     for issue in issues:
         issue["fields"]["comment"] = {"comments": client.comments(issue["key"])}
         linked = []

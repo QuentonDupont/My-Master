@@ -470,7 +470,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     from agents.historian.retrieval import Historian
-    from agents.jira_leader.gates import restate
+    from agents.jira_leader.gates import request_text, restate
 
     issue = next(json.loads(l) for l in open(args.file, encoding="utf-8")
                  if l.strip() and json.loads(l)["key"] == args.ticket)
@@ -478,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
     with Historian() as hist:
         f = issue["fields"]
         research = hist.research(issue["key"], f.get("summary") or "",
-                                 f.get("description") or "")
+                                 request_text(f))
         analysis = get_analyst(args.analyst).analyse(issue, research, sentence or "",
                                                      load_rules())
     print(json.dumps(analysis.__dict__, indent=2))
