@@ -70,6 +70,7 @@ development:
     netsuite: PRDT-10732      # NetSuite Support Tickets
     api: PRDT-10842           # [API] API bugs and incidents
     business_continuity: PRDT-11608  # [Crashlytics] Fatal crash alerts
+    pomq: PRDT-11330          # PomQ POS – Bugs and Incidents + Requests
   # PESD1 Support Escalations — created for triage-raised work.
   default_epic: PRDT-11563
 
