@@ -100,6 +100,14 @@ class FormFieldTests(unittest.TestCase):
             "description": "https://drive.google.com/file/d/x/view"})
         self.assertIsNone(sentence)
 
+    def test_should_be_done_is_a_request(self):
+        # PESD1-11358: every form field repeated the summary, and "updated"
+        # is not in REQUEST_VERBS.
+        sentence, reason = self.restate({
+            "summary": "33920-55620, 33943-55621: Both PO's currency should updated from THB to RMB",
+            "description": "https://drive.google.com/file/d/x/view"})
+        self.assertIsNotNone(sentence, reason)
+
     def test_form_values_repeating_the_summary_are_dropped(self):
         from unittest import mock
         from agents.jira_leader.gates import form_text
