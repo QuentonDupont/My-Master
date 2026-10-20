@@ -66,7 +66,9 @@ QUESTION_CONTENT_CHARS = 16
 #: alone misses "Please process the refund again".
 REQUEST_PATTERNS = re.compile(
     r"\b(please|pls|kindly|could you|can you|would you|we need|i need|needs? to"
-    r"|request(?:ing)? (?:to|for|that)|help (?:me |us )?(?:to )?\w+)\b", re.I)
+    r"|request(?:ing)? (?:to|for|that)|help (?:me |us )?(?:to )?\w+"
+    # "currency should updated", "should be changed" — PESD1-11358, 20 Oct 2026
+    r"|should (?:be )?\w+(?:ed|en))\b", re.I)
 
 MIN_CHARS = 20
 URL_RE = re.compile(r'https?://\S+')
