@@ -24,6 +24,14 @@ intake:
   # PESD1 has "Requester Email" (customfield_10304) but it is populated on 0 of
   # the last 300 tickets, so rule 1 cannot fire — the intake sheet does the work.
   requester_email_field: customfield_10304
+  # The intake form's own fields. Most tickets carry the request here, with the
+  # description holding only a Drive link — reading summary + description alone
+  # escalated PESD1-11349/11353/11358 as "no request" (20 Oct 2026). Read as
+  # request text by gates.request_text(); deliberately NOT in the content hash.
+  form_fields:
+    customfield_10251: Steps to reproduce
+    customfield_10646: Current results
+    customfield_10647: Expected outcome
 
 development:
   project: PRDT
@@ -62,6 +70,7 @@ development:
     netsuite: PRDT-10732      # NetSuite Support Tickets
     api: PRDT-10842           # [API] API bugs and incidents
     business_continuity: PRDT-11608  # [Crashlytics] Fatal crash alerts
+    pomq: PRDT-11330          # PomQ POS – Bugs and Incidents + Requests
   # PESD1 Support Escalations — created for triage-raised work.
   default_epic: PRDT-11563
 

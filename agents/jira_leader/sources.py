@@ -35,7 +35,8 @@ class JiraTicketSource(TicketSource):
         extra = intake.get("requester_email_field")
         jql = (f'project = {intake["project"]} AND status = "{intake["open_status"]}" '
                f"ORDER BY created ASC")
-        fields = FIELDS + ([extra] if extra else [])
+        fields = (FIELDS + ([extra] if extra else [])
+                  + list(intake.get("form_fields") or {}))
         issues = self.client.search(jql, fields=fields)
         LOG.info("source.jira", count=len(issues))
         return issues

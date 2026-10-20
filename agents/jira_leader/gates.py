@@ -109,11 +109,34 @@ def _text_of(issue: dict) -> str:
 
 
 # -- gate 2: sanity ---------------------------------------------------------
+def form_text(fields: dict) -> str:
+    """The intake form's fields (boards.yml `form_fields`) as labelled lines.
+
+    A value that only repeats the summary or an earlier field is dropped —
+    requesters often paste the same line into all three.
+    """
+    summary = (fields.get("summary") or "").strip()
+    seen, lines = {summary}, []
+    for field_id, label in (config.boards()["intake"].get("form_fields") or {}).items():
+        value = fields.get(field_id)
+        if not isinstance(value, str) or not value.strip() or value.strip() in seen:
+            continue
+        seen.add(value.strip())
+        lines.append(f"{label}: {value.strip()}")
+    return "\n".join(lines)
+
+
+def request_text(fields: dict) -> str:
+    """Description plus the intake form fields — what the requester actually wrote."""
+    description = (fields.get("description") or "").strip()
+    return "\n\n".join(p for p in (description, form_text(fields)) if p)
+
+
 def restate(issue: dict) -> tuple[str | None, str]:
     """Return (one-sentence requirement, reason). None means: escalate."""
     f = issue.get("fields", {}) or {}
     summary = (f.get("summary") or "").strip()
-    description = (f.get("description") or "").strip()
+    description = request_text(f)
     # A bare link is not a requirement — the detail is inside the attachment.
     blob = URL_RE.sub(" ", f"{summary} {description}").strip()
 

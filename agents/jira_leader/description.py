@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 
+from agents.jira_leader.gates import request_text
 from core import config
 
 URL_RE = re.compile(r"https?://\S+")
@@ -168,7 +169,7 @@ def build(issue: dict, retrieval, analysis, requester=None) -> str:
     fields = issue.get("fields", {}) or {}
     key = issue["key"]
     summary = (fields.get("summary") or "").strip()
-    body = (fields.get("description") or "").strip()
+    body = request_text(fields)
     comments = [(c.get("body") or "").strip() for c in
                 ((fields.get("comment") or {}).get("comments") or [])]
     comments = [c for c in comments

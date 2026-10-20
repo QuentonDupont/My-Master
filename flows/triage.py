@@ -43,12 +43,13 @@ def read_ticket(ctx):
     """Unpack the ticket and open the ledger, corpus and analyst it needs."""
     from agents.historian.retrieval import Historian
     from agents.jira_leader import analysis
+    from agents.jira_leader.gates import request_text
 
     issue = ctx["issue"]
     fields = issue.get("fields", {}) or {}
     ctx["key"] = issue["key"]
     ctx["summary"] = fields.get("summary") or ""
-    ctx["description"] = fields.get("description") or ""
+    ctx["description"] = request_text(fields)
     ctx["fields"] = fields
     if ctx.get("rules") is None:
         ctx["rules"] = analysis.load_rules()

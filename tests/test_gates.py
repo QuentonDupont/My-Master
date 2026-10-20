@@ -68,6 +68,48 @@ def tearDownModule():
     _BOARDS.__exit__(None, None, None)
 
 
+class FormFieldTests(unittest.TestCase):
+    """The intake form carries the request; the description is often a Drive link.
+
+    PESD1-11353 (20 Oct 2026) escalated as "no request and no reported problem"
+    with the whole request sitting in Steps to reproduce / Expected outcome.
+    """
+
+    FORM = {"customfield_10251": "Steps to reproduce",
+            "customfield_10646": "Current results",
+            "customfield_10647": "Expected outcome"}
+
+    def restate(self, fields):
+        from unittest import mock
+        boards = dict(config.boards())
+        boards["intake"] = {**boards["intake"], "form_fields": self.FORM}
+        with mock.patch.object(config, "boards", lambda: boards):
+            return restate({"fields": {"labels": [], "components": [], **fields}})
+
+    def test_link_only_description_restates_from_the_form(self):
+        sentence, reason = self.restate({
+            "summary": "Mistake sku in Netsuite system",
+            "description": "https://drive.google.com/file/d/x/view",
+            "customfield_10251": "Please delete wrong SKU in PO-TH-24100203 (8 SKU)",
+            "customfield_10647": "Delete wrong SKU in PO-TH-24100203 (8 SKU)"})
+        self.assertIsNotNone(sentence, reason)
+
+    def test_without_the_form_the_same_ticket_still_escalates(self):
+        sentence, _ = self.restate({
+            "summary": "Mistake sku in Netsuite system",
+            "description": "https://drive.google.com/file/d/x/view"})
+        self.assertIsNone(sentence)
+
+    def test_form_values_repeating_the_summary_are_dropped(self):
+        from unittest import mock
+        from agents.jira_leader.gates import form_text
+        boards = {"intake": {"form_fields": self.FORM}}
+        with mock.patch.object(config, "boards", lambda: boards):
+            text = form_text({"summary": "Same line", "customfield_10251": "Same line",
+                              "customfield_10646": "Other", "customfield_10647": "Other"})
+        self.assertEqual(text, "Current results: Other")
+
+
 class YesNoQuestionTests(unittest.TestCase):
     """Chat-style requests ask yes/no questions; the wh-word list alone escalated them all."""
 

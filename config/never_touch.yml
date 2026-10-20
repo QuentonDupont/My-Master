@@ -12,7 +12,9 @@ categories:
                settlement, transaction failed, double charge, charged twice]
   pricing:
     keywords: [price, pricing, discount amount, markdown price, promo value,
-               voucher value, change the price, wrong price]
+               voucher value, change the price, wrong price,
+               # a paid loyalty tier carries pricing benefits (PESD1-11349, 20 Oct 2026)
+               upgrade tier, tier upgrade, diamond tier]
   customer_pii:
     keywords: [pii, personal data, id card, passport, national id, customer address,
                phone number of customer, gdpr, pdpa, data deletion request]

@@ -226,7 +226,9 @@ PESD1-11139). Superset lag is a separate recurring symptom
 
 **Recurs:** yes. PRDT-11570 (To Do, Vishal) lists 7 manual resyncs since 31
 Jul with no root cause. PRDT-10802 (auto-create missing invoice) is Live
-but hasn't stopped it. Link new cases to PRDT-11570.
+but hasn't stopped it. PRDT-11570 went **Live on 2 Oct 2026 with no root
+cause recorded**, so new cases need a new or reopened tracker, not a link to it
+(found on PESD1-11338, 20 Oct 2026).
 
 **Refund risk, unresolved:** "Apollo Return Process" (PM,
 /wiki/spaces/PM/pages/2865364993) says Return Received is set from
@@ -311,6 +313,110 @@ on a Transfer Order, not an RMA).
 auto-creating a return — is a real bug independent of any one ticket. Worth
 raising as its own NEEDS_CODE ticket against the integration rather than
 reopening RMAs by hand every time it happens.
+
+## Henry: PO / invoice shows the wrong currency (THB / RMB / USD)
+
+*Looks like:* "PO 33917 change the THB to RMB, INV#55619", or a list of
+PO–invoice pairs. Always Selina (Yanqiong) Liu, Commercial, so far.
+
+**Fix** (Henry DB, a human, invariant 2): back up the order and invoice rows,
+then relabel the currency on the order, the invoice **and its lines** (since
+PRDT-11366 the lines inherit it). **Don't convert the amounts.** They are
+already in the right currency with the wrong label: PESD1-11358 showed
+75.70 RMB lines under a "454.20 THB" total. If the invoice has synced to
+NetSuite as a vendor bill, Vishal corrects the bill (PRDT-11368).
+
+**Who:** Quenton (did PESD1-11008, 30 Jun 2026, 21 pairs; PESD1-11297,
+12 Oct 2026). Unni owns the code (PRDT-11366/11367).
+
+**Verify:** the PO currency field and the invoice totals (Total Original
+Cost, Total After Discount, Amount Payable) read the target currency. A
+synced NetSuite bill shows CNY/USD to match.
+
+**Recurs:** yes, and the direction changes each time. The cleanup is
+PRDT-11367 (Henry legacy data) / PRDT-11368 (NetSuite), both To Do, past due
+18 Sep. Check the vendor's default currency too (inference).
+
+## NetSuite: wrong SKU on a PO-TH-241xxxxx sample (PPS) PO
+
+*Looks like:* "Mistake sku in Netsuite system — delete wrong SKU in
+PO-TH-24100203". These are NetSuite-native sample POs keyed by the design
+buyers, not Henry POs (Henry numbers look like 29748-51086).
+
+**Fix:** open the PO and check the Receiving and Billing tabs. Delete, or
+tick Closed on, **only lines with Received = 0 and Billed = 0**. Delete the
+whole PO only when nothing on it is received (PESD1-10135, PESD1-8717).
+A received or billed line touches an Item Receipt and stock, so it needs
+Finance approval first (PESD1-2306).
+
+**Who:** Quenton in NetSuite. Alternate: Vishal.
+
+**Verify:** the PO reads Fully Received / Pending Billing, and the RF
+receive screen shows no open lines. Search #trading-warehouse for the PO
+number: the warehouse usually confirms there what physically arrived
+(PESD1-11353, 19 Oct 2026).
+
+**Recurs:** yes, from buyer keying errors. The lasting fix is buyer training.
+
+## NetSuite: bins created under the wrong location
+
+*Looks like:* "update it from TH Inbound Defect to TH Defect Grade C", with
+a bin search link (location 190, "RT-") and a sheet of bins (PESD1-11350).
+Requesters may call it a "work order".
+
+**Fix:** run the bin search and confirm on-hand is 0 for every bin. Then
+CSV-import an update of the Bin records' Location (TH Defect Grade C = 474).
+**A bin holding stock needs an inventory transfer, which is never-touch
+(stock).** Escalate it with no comment.
+
+**Who:** Quenton. Alternate: Vishal. Nearest precedent: PESD1-11011 (TO
+destination location change, Quenton, 1 Jul 2026). No exact bin precedent
+exists.
+
+## New store: NetSuite + Apollo location setup
+
+*Looks like:* "Request to Create New Location – <store>" from Nonthakorn
+Malai (Stores). SOP: Confluence PM 2872836098 "New Store and location
+setup". Store Fulfilment: ENG 2320072707.
+
+**Order:**
+1. Check the main NetSuite location doesn't already exist (on PESD1-11235 it did).
+2. Create the 4 NetSuite locations (store, Lost, NCG, Lost SF).
+3. Create the NetSuite Site-to-Store department (Vishal made KH's, dept 122).
+4. Put the NetSuite location ID on the Apollo location. The requester often creates the Apollo location herself first: 139 on PESD1-11352.
+5. Create the Apollo "- TO" location and link the order type.
+6. Add the store to `pml_pickup_location_shop` for Store Fulfilment.
+7. Send the NetSuite ID to the Henry dev and to Rajasekaran for the Superset store cluster.
+
+The SF SOP says "active"; the requester usually wants it inactive. Ask.
+
+**Who:** Quenton (PESD1-11236, 10418, 10895, 10867, 10321, 10343).
+Date-bound: it has to be done before the opening.
+
+## Superset dataset or new field request
+
+PRDT clone titled "[Data Engineering] - …", assigned to **Rajasekaran
+Murugesan** (PRDT-10937, 10866, 10859, 10861, 10877, 10881, 11097, 11107,
+11144). This corrects the 12 Oct 2026 HANDOFF note that no data-engineering
+route exists. A dataset with staff names or emails is employee PII: the board
+owner approves it before it is cloned, with role-restricted access
+(PESD1-11332).
+
+## PomQ POS feature request
+
+Clone to **Bikesh Shakya Banda** (current [POMQ] dev: PRDT-11790, 11553,
+11531, 11525) under epic **PRDT-11330**. Wallop owns the epic. Default to
+priority Medium: the intake form files these as Critical Incidents
+(PESD1-11355).
+
+## Loyalty tier change (e.g. "Please Upgrade Tier" to Diamond)
+
+**Never-touch, escalate.** Diamond is a paid subscription carrying pricing
+benefits (PRDT-11000, PRDT-11509), on a customer account in Apollo. Quenton
+has done these by hand (PESD1-11289, 10977, 11093); Wallop did PESD1-10355.
+**Recurs** until PRDT-11531/11532 ("[POMQ] Offline Diamond tier
+subscription purchase", Bikesh/Wallop, To Do) ship: offline purchases don't
+upgrade the tier.
 
 ---
 

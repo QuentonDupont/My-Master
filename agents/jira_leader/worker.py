@@ -44,9 +44,13 @@ def unreadable_detail(issue: dict) -> str | None:
     Drive link or an attachment. The human has to be told when that is the case,
     rather than shown a confident proposal written from a title.
     """
+    from agents.jira_leader.gates import form_text
+
     fields = issue.get("fields", {}) or {}
     description = (fields.get("description") or "").strip()
     attachments = fields.get("attachment") or []
+    if form_text(fields):
+        return None
     if description and URL_ONLY_RE.match(description):
         return "description is only a link — the detail is not readable"
     if attachments and not description:
