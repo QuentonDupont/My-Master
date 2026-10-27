@@ -14,10 +14,21 @@ from tests.helpers import sandbox
 class FakeJira:
     """Read and write in one stub; `moves` records every transition attempted."""
 
-    def __init__(self, statuses, offered=None):
+    def __init__(self, statuses, offered=None, links=None):
         self.statuses = dict(statuses)
         self.offered = offered or {}
+        self.links = links or {}          # parent -> [linked keys] (Cloners)
         self.moves = []
+        self.searches = []
+
+    def search(self, jql, fields=None, **kw):
+        self.searches.append(jql)
+        if self.links is None:
+            raise RuntimeError("search down")
+        return [{"key": parent, "fields": {"issuelinks": [
+                    {"type": {"name": "Cloners"}, "inwardIssue": {"key": k}}
+                    for k in keys]}}
+                for parent, keys in self.links.items()]
 
     def issue(self, key, fields="*all"):
         return {"fields": {"status": {"name": self.statuses[key]}}}
@@ -123,6 +134,85 @@ class DriftTests(unittest.TestCase):
                 executed(led, clone="BUSK-2805")
                 j = FakeJira({"PESD1-11282": "To Do", "BUSK-2805": "Live"})
                 self.assertEqual(M.drift(j, led), [])
+
+
+class LinkedCloneTests(unittest.TestCase):
+    """Pairs found from Jira clone links, not just the ledger (27 Oct 2026)."""
+
+    def test_a_clone_linked_in_jira_is_mirrored_without_a_ledger_row(self):
+        with sandbox():
+            with L.Ledger() as led:
+                j = FakeJira({"PESD1-10339": "To Do", "PRDT-10713": "Live"},
+                             links={"PESD1-10339": ["PRDT-10713"]})
+                rows = M.drift(j, led)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual((rows[0]["parent"], rows[0]["action"], rows[0]["target"]),
+                             ("PESD1-10339", "mirror", "Live"))
+
+    def test_the_search_only_asks_for_open_pesd1_parents(self):
+        with sandbox():
+            with L.Ledger() as led:
+                j = FakeJira({})
+                M.drift(j, led)
+            self.assertIn("project = PESD1", j.searches[0])
+            self.assertIn("Cloners", j.searches[0])
+
+    def test_a_link_to_another_board_is_ignored(self):
+        with sandbox():
+            with L.Ledger() as led:
+                j = FakeJira({"PESD1-1": "To Do", "BUSK-9": "Live"},
+                             links={"PESD1-1": ["BUSK-9"]})
+                self.assertEqual(M.drift(j, led), [])
+
+    def test_clones_that_agree_move_the_parent(self):
+        with sandbox():
+            with L.Ledger() as led:
+                j = FakeJira({"PESD1-1": "To Do", "PRDT-1": "Live", "PRDT-2": "Live"},
+                             links={"PESD1-1": ["PRDT-1", "PRDT-2"]})
+                row = M.drift(j, led)[0]
+            self.assertEqual((row["action"], row["target"]), ("mirror", "Live"))
+
+    def test_clones_that_disagree_are_reported_not_mirrored(self):
+        with sandbox():
+            with L.Ledger() as led:
+                j = FakeJira({"PESD1-1283": "To Do", "PRDT-7251": "Blocked",
+                              "PRDT-7511": "To Do"},
+                             links={"PESD1-1283": ["PRDT-7251", "PRDT-7511"]})
+                row = M.drift(j, led)[0]
+                moved = M.apply_items([row], j, j, led, execute=True)
+            self.assertEqual(row["action"], "report")
+            self.assertIn("clones disagree", row["why"])
+            self.assertEqual(j.moves, [])
+            self.assertEqual(moved, [])
+
+    def test_a_pair_in_both_the_ledger_and_jira_is_seen_once(self):
+        with sandbox():
+            with L.Ledger() as led:
+                executed(led)
+                j = FakeJira({"PESD1-11282": "To Do", "PRDT-11570": "Live"},
+                             links={"PESD1-11282": ["PRDT-11570"]})
+                rows = M.drift(j, led)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["clone"], "PRDT-11570")
+
+    def test_a_failed_link_search_still_mirrors_the_ledger(self):
+        with sandbox():
+            with L.Ledger() as led:
+                executed(led)
+                j = FakeJira({"PESD1-11282": "To Do", "PRDT-11570": "Live"})
+                j.links = None
+                rows = M.drift(j, led)
+            self.assertEqual([r["parent"] for r in rows], ["PESD1-11282"])
+
+    def test_linked_parents_keep_every_other_limit(self):
+        with sandbox():
+            with L.Ledger() as led:
+                j = FakeJira({"PESD1-1": "Live", "PRDT-1": "To Do",
+                              "PESD1-2": "To Do", "PRDT-2": "Closed - Won't Do"},
+                             links={"PESD1-1": ["PRDT-1"], "PESD1-2": ["PRDT-2"]})
+                rows = {r["parent"]: r for r in M.drift(j, led)}
+            self.assertEqual(rows["PESD1-1"]["action"], "report")   # backwards
+            self.assertEqual(rows["PESD1-2"]["action"], "report")   # closing
 
 
 class ApplyTests(unittest.TestCase):

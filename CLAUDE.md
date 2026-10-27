@@ -38,7 +38,12 @@ Do not query, write to, or reason about any other Jira project.
    wide and no wider:
    - transitions only, never a comment, clone, link or assignment
    - the PESD1 parent only, never the clone, and only to the status implied by
-     the clone recorded against it in the ledger
+     its PRDT clone: the one recorded against it in the ledger, or (widened
+     27 Oct 2026 by the board owner: "make the status changes according to what
+     the developer has updated on their PRDT tickets … this should be an
+     automated process") one linked to an open PESD1 ticket in Jira as a clone
+     (Cloners link). A parent with several clones moves only when they all
+     imply the same status; otherwise it is reported
    - forward along the declared order only; a parent is never moved backwards
    - never into a closing status — invariant 9 still holds, so a clone closed as
      Won't Do is reported for a human, not mirrored
