@@ -2,8 +2,10 @@
 
 The requester watches the PESD1 ticket; the work happens on the PRDT clone. When
 those drift, the person who asked is told nothing while their request moves from
-To Do to Live. This walks the ledger's parent/clone pairs and moves the parent to
-match.
+To Do to Live. This walks every parent/clone pair — the ledger's, plus open PESD1
+tickets linked "is cloned by" a PRDT ticket in Jira itself — and moves the parent
+to match. Most of the board was cloned by hand or before the ledger existed, so
+the ledger alone never saw it (27 Oct 2026).
 
 Sanctioned exception to invariant 1
 -----------------------------------
@@ -13,8 +15,10 @@ made when the clone was approved, and mirroring is bookkeeping after it. The
 exception is deliberately narrow and CLAUDE.md names it:
 
 * transitions only — never a comment, a clone, a link or an assignment
-* only a PESD1 parent, only to the status of the PRDT clone recorded in the
-  ledger for that parent
+* only a PESD1 parent, only to the status of its PRDT clone — the one recorded
+  in the ledger, or the one linked to it in Jira as a clone (Cloners link)
+* a parent with several clones moves only when every clone implies the same
+  status; when they disagree it is reported
 * forward only, along the declared order, so a parent is never dragged backwards
 * never to a closing status: invariant 9 keeps closing a human decision, so
   "Closed - Won't Do" on the clone is reported, not mirrored
@@ -67,6 +71,13 @@ ORDER = {
 #: Never mirrored. Closing is a human decision (invariant 9).
 NEVER_MIRROR = {"Closed - Won't Do"}
 
+#: The Jira link type a clone carries back to the ticket it was cloned from.
+CLONE_LINK = "Cloners"
+
+#: Open PESD1 parents with a clone link. Closed parents are left alone.
+LINKED_JQL = ('project = PESD1 AND issueLinkType = "{link}" '
+              'AND status not in ("Live", "Closed - Won\'t Do")')
+
 
 def target_for(clone_status: str) -> str | None:
     """The PESD1 status a clone in `clone_status` implies, or None."""
@@ -89,6 +100,37 @@ def is_forward(current: str, target: str) -> bool:
     return there > here
 
 
+def linked_clones(reader) -> dict[str, list[str]]:
+    """Open PESD1 parents -> the PRDT tickets linked to them as clones in Jira."""
+    out: dict[str, list[str]] = {}
+    jql = LINKED_JQL.format(link=CLONE_LINK)
+    for issue in reader.search(jql, fields=["issuelinks"]):
+        for link in issue["fields"].get("issuelinks") or []:
+            if (link.get("type") or {}).get("name") != CLONE_LINK:
+                continue
+            other = link.get("inwardIssue") or link.get("outwardIssue") or {}
+            key = other.get("key", "")
+            if key.startswith("PRDT-"):
+                out.setdefault(issue["key"], []).append(key)
+    return out
+
+
+def pairs(reader, led: ledger_mod.Ledger) -> dict[str, list[str]]:
+    """Every parent and its clones: the ledger's executed rows, then Jira's links."""
+    out: dict[str, list[str]] = {}
+    for row in led.by_state(ledger_mod.EXECUTED):
+        parent, clone = row.get("ticket_key"), row.get("clone_key")
+        if parent and clone:
+            out.setdefault(parent, []).append(clone)
+    try:
+        for parent, clones in linked_clones(reader).items():
+            known = out.setdefault(parent, [])
+            known.extend(c for c in clones if c not in known)
+    except Exception as exc:
+        LOG.warn("mirror.link_search_failed", error=str(exc)[:120])
+    return out
+
+
 def drift(reader, led: ledger_mod.Ledger | None = None) -> list[dict]:
     """Parent/clone pairs whose statuses disagree. Pure read."""
     own = led is None
@@ -96,24 +138,30 @@ def drift(reader, led: ledger_mod.Ledger | None = None) -> list[dict]:
     allowed = set(config.allowed_projects())
     try:
         out = []
-        for row in led.by_state(ledger_mod.EXECUTED):
-            parent, clone = row.get("ticket_key"), row.get("clone_key")
-            if not parent or not clone:
-                continue
-            if clone.split("-")[0] not in allowed:
+        for parent, clones in pairs(reader, led).items():
+            clones = [c for c in clones if c.split("-")[0] in allowed]
+            if not clones:
                 continue
             try:
                 p = reader.issue(parent, fields="status")["fields"]["status"]["name"]
-                c = reader.issue(clone, fields="status")["fields"]["status"]["name"]
+                statuses = {c: reader.issue(c, fields="status")["fields"]["status"]["name"]
+                            for c in clones}
             except Exception as exc:
                 LOG.warn("mirror.read_failed", parent=parent, error=str(exc)[:120])
                 continue
 
-            target = target_for(c)
+            clone = ", ".join(clones)
+            targets = {target_for(s) for s in statuses.values()}
+            c = ", ".join(sorted(set(statuses.values())))
+            target = targets.pop() if len(targets) == 1 else None
             item = {"parent": parent, "clone": clone,
                     "parent_status": p, "clone_status": c,
                     "target": target, "action": "", "why": ""}
-            if target is None:
+            if targets:                  # more than one implied status
+                item["action"] = "report"
+                item["why"] = ("clones disagree: "
+                               + ", ".join(f"{k} is {v}" for k, v in statuses.items()))
+            elif target is None:
                 item["action"] = "report"
                 item["why"] = (f"{c} is not mirrored"
                                + (" — closing is a human decision"
