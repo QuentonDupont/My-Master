@@ -44,7 +44,9 @@ Do not query, write to, or reason about any other Jira project.
      automated process") one linked to an open PESD1 ticket in Jira as a clone
      (Cloners link). A parent with several clones moves only when they all
      imply the same status; otherwise it is reported
-   - forward along the declared order only; a parent is never moved backwards
+   - forward along the declared order only; a parent is never moved backwards, and a
+     Blocked parent is a person's hold — only a clone that has started work (In progress or
+     later) lifts it, never a clone still in To Do (29 Oct 2026)
    - never into a closing status — invariant 9 still holds, so a clone closed as
      Won't Do is reported for a human, not mirrored
    - a transition the workflow does not offer is reported, never forced
