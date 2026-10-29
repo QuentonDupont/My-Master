@@ -82,7 +82,10 @@ def is_forward(current: str, target: str) -> bool:
     if target == "Blocked":
         return current != "Blocked"
     if current == "Blocked":
-        return True                      # leaving Blocked is always progress
+        # A person (or a fixed route — Crashlytics parks its parent in Blocked) put the
+        # parent on hold; a clone still in To Do is no reason to lift it. Only a clone
+        # that has started work releases it (29 Oct 2026).
+        return ORDER.get(target, -1) > ORDER["To Do"]
     here, there = ORDER.get(current), ORDER.get(target)
     if here is None or there is None:
         return False
