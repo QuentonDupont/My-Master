@@ -75,10 +75,25 @@ class DirectionTests(unittest.TestCase):
     def test_standing_still_is_not_a_move(self):
         self.assertFalse(M.is_forward("To Do", "To Do"))
 
-    def test_blocked_can_be_entered_from_anywhere_and_left(self):
+    def test_blocked_can_be_entered_from_anywhere(self):
         self.assertTrue(M.is_forward("In progress", "Blocked"))
-        self.assertTrue(M.is_forward("Blocked", "To Do"))
         self.assertFalse(M.is_forward("Blocked", "Blocked"))
+
+    def test_blocked_is_left_only_once_the_clone_has_started(self):
+        self.assertTrue(M.is_forward("Blocked", "In progress"))
+        self.assertTrue(M.is_forward("Blocked", "Live"))
+        self.assertFalse(M.is_forward("Blocked", "To Do"))
+
+    def test_a_blocked_parent_is_not_unblocked_by_a_clone_in_to_do(self):
+        with sandbox():
+            with L.Ledger() as led:
+                executed(led, parent="PESD1-11371", clone="PRDT-11950")
+                j = FakeJira({"PESD1-11371": "Blocked", "PRDT-11950": "To Do"})
+                row = M.drift(j, led)[0]
+                moved = M.apply_items([row], j, j, led, execute=True)
+            self.assertEqual(row["action"], "report")
+            self.assertEqual(j.moves, [])
+            self.assertEqual(moved, [])
 
 
 class DriftTests(unittest.TestCase):

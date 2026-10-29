@@ -257,7 +257,13 @@ def validate(data: dict) -> list[str]:  # noqa: C901 - a checklist, kept flat on
         if not clone.get("link_type"):
             p.append("clone.link_type is empty")
         expected_transition = config.boards()["intake"]["dev_transition"]
-        if data.get("pesd1_transition") != expected_transition:
+        # A fixed route may name its own parent status (Crashlytics → Blocked);
+        # only a proposal carrying that route's flag may use it.
+        flags = data.get("flags") if isinstance(data.get("flags"), list) else []
+        allowed = {expected_transition} | {
+            r["pesd1_transition"] for r in config.boards().get("fixed_routes") or []
+            if r.get("pesd1_transition") and f"route:{r.get('name')}" in flags}
+        if data.get("pesd1_transition") not in allowed:
             p.append(f"pesd1_transition must be {expected_transition!r} when cloning")
 
     if not isinstance(data.get("flags"), list):

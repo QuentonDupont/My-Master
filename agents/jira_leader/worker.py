@@ -133,7 +133,8 @@ def routed_proposal(issue: dict, restated: str, route: dict, *,
             labels=list(route["labels"]),
             priority=priority,
             link_type=config.boards()["development"]["link_type"]),
-        pesd1_transition=config.boards()["intake"]["dev_transition"],
+        pesd1_transition=(route.get("pesd1_transition")
+                          or config.boards()["intake"]["dev_transition"]),
         flags=[f"route:{route['name']}", "requester_unknown"])
 
 

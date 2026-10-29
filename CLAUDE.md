@@ -39,7 +39,9 @@ Do not query, write to, or reason about any other Jira project.
    - transitions only, never a comment, clone, link or assignment
    - the PESD1 parent only, never the clone, and only to the status implied by
      the clone recorded against it in the ledger
-   - forward along the declared order only; a parent is never moved backwards
+   - forward along the declared order only; a parent is never moved backwards, and a
+     Blocked parent is a person's hold — only a clone that has started work (In progress or
+     later) lifts it, never a clone still in To Do (29 Oct 2026)
    - never into a closing status — invariant 9 still holds, so a clone closed as
      Won't Do is reported for a human, not mirrored
    - a transition the workflow does not offer is reported, never forced
