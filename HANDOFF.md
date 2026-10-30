@@ -1,3 +1,15 @@
+# Handoff — 30 Oct 2026: automation guard
+
+* Nine Jira Automation rules "[PM-Auto] 01 … 10" were built for PESD1/PRDT via the Automation
+  REST API (code + payloads in `~/pomelo/tools/jira-automations/`, brain notes in
+  `~/Claude-Brain/recipes/jira-automations/`). Rule 01 (Crashlytics clone) and 02 (status follows
+  PRDT) now do in Jira what the Crashlytics fixed route and the mirror flow did here; both still
+  run here too and are idempotent with the rules (Crashlytics parents leave Waiting Support at once,
+  so intake no longer sees them).
+* New flow `automation-guard` (hourly, live): estimates the automation-steps meter (13,800/period,
+  reset on the 12th; 4,431 used at 30 Oct 11:32) and at 90% switches every [PM-Auto] rule off.
+  Third sanctioned Jira writer (`core/flow.py` SANCTIONED/UNATTENDED_JIRA_WRITERS, CLAUDE.md inv. 1).
+
 # Handoff — 29 Oct 2026: Crashlytics parents park in Blocked
 
 * **New Crashlytics flow** (board owner, 29 Oct 2026, on PESD1-11298): after the PRDT

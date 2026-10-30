@@ -45,6 +45,17 @@ Do not query, write to, or reason about any other Jira project.
    - never into a closing status — invariant 9 still holds, so a clone closed as
      Won't Do is reported for a human, not mirrored
    - a transition the workflow does not offer is reported, never forced
+   **Second exception, added 30 Oct 2026 by the board owner: the automation
+   guard** (`flows/automation_guard.py`, agent `guard_automation_usage`). Nine
+   Jira Automation rules named "[PM-Auto] …" were built for PESD1/PRDT, and the
+   board owner asked: "keep an eye on the usage, let me know when we are
+   approaching the limit and then make sure you turn all of them off". Hourly,
+   it estimates the site's automation-steps usage (no Jira API for the meter;
+   estimate in `~/pomelo/tools/jira-automations/guard.py`), alerts at 80% and
+   at 90% switches the rules off. It is exactly this wide:
+   - it may only switch rules whose name starts "[PM-Auto]" to DISABLED —
+     never enable, edit, create or delete a rule, and never touch an issue
+   - a dry run (any manual run without `--execute`) only estimates
    Everything else still goes through `execute_proposal`.
 2. **No writes to Apollo or Henry. Ever.** Read-only integrations only, and only
    after they are explicitly added in a later phase.
@@ -144,6 +155,7 @@ mirror, daily-report); manual runs are dry-run unless `--execute`.
 | daily-report | 09:00 | check_health → build_brief → assemble_report → render_report → save_report → send_report (only if Gmail is configured) |
 | rules | Mon 08:30 | cluster_corrections → write_rule_proposals |
 | housekeeping | hourly | rotate_logs → prune_run_history |
+| automation-guard | hourly | estimate_automation_usage → guard_automation_usage (switches [PM-Auto] rules off at 90%) |
 | retriage | human (a rule changed) | load_for_retriage → claim_for_retriage → run_triage → record_retriage_correction |
 
 `python -m flows list | show <flow> | run <flow> [--execute] [--confirm] | tick |

@@ -31,9 +31,9 @@ class RegistryTests(unittest.TestCase):
             for a in f.agents:
                 self.assertTrue(a.doc, f"{f.name}.{a.name} has no docstring")
 
-    def test_only_execute_and_mirror_write_to_jira(self):
+    def test_only_execute_mirror_and_automation_guard_write_to_jira(self):
         writers = {f.name for f in flows.registry().values() if "jira_write" in f.effects}
-        self.assertEqual(writers, {"execute", "mirror"})
+        self.assertEqual(writers, {"execute", "mirror", "automation-guard"})
 
     def test_execute_is_human_only_and_refuses_unconfirmed_runs(self):
         ex = flows.get("execute")

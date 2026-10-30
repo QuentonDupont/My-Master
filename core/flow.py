@@ -15,9 +15,10 @@ declared trigger:
 The guardrails of CLAUDE.md are enforced here, at definition time, so a flow
 that would break them cannot even be constructed:
 
-  * an agent may declare `jira_write` only if it is one of the two sanctioned
-    write paths — `execute_proposal` (invariant 1) and `mirror_parent_status`
-    (the status-mirroring exception);
+  * an agent may declare `jira_write` only if it is one of the sanctioned
+    write paths — `execute_proposal` (invariant 1), `mirror_parent_status`
+    (the status-mirroring exception) and `guard_automation_usage` (switches
+    [PM-Auto] automation rules off near the usage limit);
   * a flow containing `execute_proposal` must be Human-triggered only. Approval
     queues it; nothing runs it unattended.
 
@@ -44,8 +45,12 @@ JIRA_WRITE = "jira_write"
 EMAIL = "email"
 EFFECTS = (READ, LOCAL, JIRA_WRITE, EMAIL)
 
-#: The only agents allowed to write to Jira. Invariant 1 and its one exception.
-SANCTIONED_JIRA_WRITERS = frozenset({"execute_proposal", "mirror_parent_status"})
+#: The only agents allowed to write to Jira. Invariant 1 and its exceptions.
+#: guard_automation_usage only ever switches [PM-Auto] automation rules OFF (30 Oct 2026).
+SANCTIONED_JIRA_WRITERS = frozenset({"execute_proposal", "mirror_parent_status",
+                                     "guard_automation_usage"})
+#: Of those, the ones a scheduled flow may run unattended.
+UNATTENDED_JIRA_WRITERS = frozenset({"mirror_parent_status", "guard_automation_usage"})
 #: Agents that may only ever run under a Human trigger.
 HUMAN_ONLY = frozenset({"execute_proposal"})
 
@@ -287,7 +292,7 @@ class Flow:
                 f"on a Human trigger — approval queues it, nothing runs it unattended")
         if self.live_when_scheduled:
             writers = {a.name for a in self.agents if a.effect == JIRA_WRITE}
-            if writers - {"mirror_parent_status"}:
+            if writers - UNATTENDED_JIRA_WRITERS:
                 raise FlowError(f"flow {self.name} cannot write to Jira unattended")
 
     @property
