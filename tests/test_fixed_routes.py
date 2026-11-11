@@ -96,5 +96,45 @@ class FixedRouteTests(unittest.TestCase):
         self.assertEqual(epics[route["labels"][0]], "PRDT-11608")
 
 
+
+class FixedRouteTransitionTests(unittest.TestCase):
+    """A route may park the PESD1 parent somewhere other than the default
+    (Crashlytics → Blocked, Quenton 29 Oct 2026, on PESD1-11298)."""
+
+    def run_inbox(self, issues):
+        with tempfile.TemporaryDirectory() as tmp:
+            inbox = pathlib.Path(tmp) / "inbox.jsonl"
+            inbox.write_text("".join(json.dumps(i) + "\n" for i in issues))
+            return queue_mod.run(FileTicketSource(inbox), analyst_kind="heuristic",
+                                 sheet_path=str(FIXTURES / "intake_sheet.csv"))
+
+    def proposal(self, route):
+        config.boards()["fixed_routes"] = [route]
+        build_corpus()
+        self.run_inbox([crash("PESD1-11298", "SignInHubActivity.onCreate", "4.88.2")])
+        return {p.ticket: p for p in P.load_all()}["PESD1-11298"]
+
+    def test_a_route_transition_is_used_for_its_alerts(self):
+        with sandbox():
+            p = self.proposal(dict(ROUTE, pesd1_transition="Blocked"))
+            self.assertEqual(p.pesd1_transition, "Blocked")
+            self.assertEqual(P.validate(p.to_dict()), [])
+
+    def test_without_one_the_default_transition_applies(self):
+        with sandbox():
+            p = self.proposal(ROUTE)
+            self.assertEqual(p.pesd1_transition, config.boards()["intake"]["dev_transition"])
+
+    def test_live_config_parks_crashlytics_parents_in_blocked(self):
+        routes = {r["name"]: r for r in config.boards().get("fixed_routes") or []}
+        self.assertEqual(routes["crashlytics"].get("pesd1_transition"), "Blocked")
+
+    def test_only_the_routes_own_proposals_may_use_it(self):
+        with sandbox():
+            data = self.proposal(dict(ROUTE, pesd1_transition="Blocked")).to_dict()
+            data["flags"] = [f for f in data["flags"] if not f.startswith("route:")]
+            self.assertTrue(any("pesd1_transition" in e for e in P.validate(data)))
+
+
 if __name__ == "__main__":
     unittest.main()

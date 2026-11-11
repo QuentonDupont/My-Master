@@ -98,6 +98,17 @@ class DirectionTests(unittest.TestCase):
     def test_a_blocked_parent_is_not_unblocked_by_a_clone_in_to_do(self):
         with sandbox():
             with L.Ledger() as led:
+                executed(led, parent="PESD1-11371", clone="PRDT-11950")
+                j = FakeJira({"PESD1-11371": "Blocked", "PRDT-11950": "To Do"})
+                row = M.drift(j, led)[0]
+                moved = M.apply_items([row], j, j, led, execute=True)
+            self.assertEqual(row["action"], "report")
+            self.assertEqual(j.moves, [])
+            self.assertEqual(moved, [])
+
+    def test_a_blocked_parent_found_by_link_is_not_unblocked_by_a_clone_in_to_do(self):
+        with sandbox():
+            with L.Ledger() as led:
                 j = FakeJira({"PESD1-11344": "Blocked", "PRDT-11922": "To Do"},
                              links={"PESD1-11344": ["PRDT-11922"]})
                 row = M.drift(j, led)[0]

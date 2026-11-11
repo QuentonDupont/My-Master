@@ -87,6 +87,11 @@ fixed_routes:
     summary_prefix: "[Crashlytics]"
     labels: [business_continuity, tech_ops]
     assignee: Rahul Ravindra
+    # Where the PESD1 parent goes once the PRDT clone exists and is assigned
+    # (29 Oct 2026, on PESD1-11298: "i want all of them to move to blocked after
+    # PRDT creation and assignement on the PESD1 side"). Overrides
+    # intake.dev_transition for this route only.
+    pesd1_transition: Blocked
     comment: "This is an automated Crashlytics crash alert. It has been passed to the Android team as a development ticket, linked here."
 
 # Ticket families whose correct developer is already known, but whose

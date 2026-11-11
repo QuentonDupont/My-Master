@@ -1,3 +1,17 @@
+# Handoff — 29 Oct 2026: Crashlytics parents park in Blocked
+
+* **New Crashlytics flow** (board owner, 29 Oct 2026, on PESD1-11298): after the PRDT
+  clone is created and assigned to Rahul, the PESD1 parent moves to **Blocked**, not To Do.
+  `fixed_routes` entries may now carry `pesd1_transition` (crashlytics: `Blocked`);
+  `routed_proposal` uses it and `proposals.validate` accepts it only on that route's
+  proposals. Waiting Support → Blocked is a direct transition on PESD1.
+* **Mirror no longer lifts a Blocked parent while its clone is To Do** — it used to treat
+  any exit from Blocked as progress, which would have undone every Crashlytics parent
+  within 5 minutes (and on 29 Oct pulled five hand-blocked ones back). A clone In progress
+  or later still releases it; until then the pair is reported. Note PESD1 offers only
+  To Do / Won't Do from Blocked, so a Crashlytics parent whose clone goes Live is
+  reported for a human rather than moved.
+
 # Handoff — 12 Oct 2026: flows refactor (branch `refactor/agentic-flows`)
 
 Everything recurring is now single-purpose agents chained into flows, each
