@@ -70,6 +70,16 @@ class EntityTests(unittest.TestCase):
         self.assertEqual(e.transfers, ["TO-00964910"])
         self.assertEqual(e.sku_refs, ["151164-381846"])
 
+    def test_po_invoice_pairs_are_pos_not_skus(self):
+        e = entities.extract("33920-55620,33943-55621: Both PO's currency should be RMB")
+        self.assertEqual(e.pos, [33920, 33943])
+        self.assertEqual(e.invoices, [55620, 55621])
+        self.assertEqual(e.sku_refs, [])
+
+    def test_from_x_to_y_means_the_ask_is_y(self):
+        self.assertEqual(entities.extract("currency should updated from THB to RMB").currencies, ["RMB"])
+        self.assertEqual(entities.extract("Adjust product 510465 to be RMB").currencies, ["RMB"])
+
     def test_a_bare_number_is_not_guessed(self):
         self.assertTrue(entities.extract("we sold 3865970 items").empty())
 
@@ -181,6 +191,13 @@ class PlaybookTests(unittest.TestCase):
         self.assertTrue(chosen[0].never_touch)
         f = chosen[0].investigate(entities.Entities(), lambda *a, **k: [], lambda *a, **k: "")
         self.assertEqual(f.fix_sql, "")
+
+    def test_keywords_match_whole_words_only(self):
+        # "po" inside "report"/"support", "back to" alone: not a PO status revert.
+        text = "Please send the sales report back to support, it was cancelled"
+        self.assertNotIn("po_status_revert", [p.key for p in playbooks.choose(text, entities.extract(text))])
+        text = "Please revert PO 35505 from cancelled"
+        self.assertEqual(playbooks.choose(text, entities.extract(text))[0].key, "po_status_revert")
 
     def test_duplicate_return_ticket_matches_its_playbook(self):
         text = "Please delete the return order as it has been created multiple times by the system. RMA1413955"

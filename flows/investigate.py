@@ -47,12 +47,22 @@ def load_investigation_tickets(ctx):
     if not keys:
         jql = f'project = {intake["project"]} AND status = "{intake["open_status"]}" ORDER BY created ASC'
         keys = [i["key"] for i in client.search(jql, fields=["summary"])]
-    items = []
+    items, skipped = [], []
     for key in keys:
-        issue = client.issue(key)
-        comments = [c.get("body") or "" for c in client.comments(key)][-10:]
-        items.append({"issue": issue, "text": _text(issue, comments)})
-    ctx["items"] = items
+        for attempt in (1, 2):   # one retry: a single Jira timeout must not sink the batch
+            try:
+                issue = client.issue(key)
+                status = ((issue.get("fields") or {}).get("status") or {})
+                if (status.get("statusCategory") or {}).get("key") == "done":
+                    skipped.append(f"{key}: already {status.get('name')} — nothing to investigate")
+                    break
+                comments = [c.get("body") or "" for c in client.comments(key)][-10:]
+                items.append({"issue": issue, "text": _text(issue, comments)})
+                break
+            except Exception as exc:  # noqa: BLE001 — record and move on to the next ticket
+                if attempt == 2:
+                    skipped.append(f"{key}: {str(exc)[:160]}")
+    ctx["items"], ctx["skipped"] = items, skipped
 
 
 @agent("extract_ids", READ)
@@ -160,7 +170,7 @@ def write_investigations(ctx):
             "errors": it["errors"],
         }
         written.append(str(report.write(inv, folder)))
-    ctx["report"] = {"written": written, "db": ctx.get("db_label")}
+    ctx["report"] = {"written": written, "db": ctx.get("db_label"), "skipped": ctx.get("skipped", [])}
 
 
 INVESTIGATE = Flow(

@@ -13,6 +13,7 @@ playbook (and its queries in the Queries repo) is added once a person has solved
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -46,10 +47,11 @@ class Playbook:
     code_repos: tuple[str, ...] = ()   # where code_terms are searched; empty = every clone
 
     def matches(self, text: str) -> int:
+        """Whole words only — "po" must not match inside "report" or "support" (12 Nov triage)."""
         low = text.lower()
         score = 0
         for group in self.all_of:
-            hits = sum(1 for w in group if w in low)
+            hits = sum(1 for w in group if re.search(rf"(?<![a-z0-9]){re.escape(w)}(?![a-z0-9])", low))
             if not hits:
                 return 0
             score += hits
