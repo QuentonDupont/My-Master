@@ -146,6 +146,73 @@ def _po_status(ents: Entities, run, render) -> Finding:
     return f
 
 
+# -- Henry PO styles (lines) cancelled -----------------------------------------
+LINE_STATUS = {"1": "New", "3": "Canceled", "4": "Approved", "5": "Invoice Generated", "7": "Complete",
+               "12": "Order Placed", "13": "In Production", "14": "Production Complete"}
+
+
+def _po_lines(ents: Entities, run, render) -> Finding:
+    f = Finding()
+    if not ents.products:
+        f.info_needed.append("Which styles? The ticket names the PO but no style ids — ask the requester.")
+        return f
+    rows = run("henry_po_lines", po_ids=ents.pos)
+    f.queries_run.append("henry_po_lines")
+    asked = set(ents.products)
+    for r in rows:
+        if int(r["style"]) in asked:
+            f.evidence.append(f"PO {r['po']} style {r['style']}: line status {r['line_status']} "
+                              f"({LINE_STATUS.get(str(r['line_status']), '?')}), {r['sizes']} sizes, qty {r['qty']}; "
+                              f"PO total_quantity {r['po_total_quantity']}")
+    cancelled = {int(r["style"]): int(r["po"]) for r in rows if int(r["style"]) in asked and str(r["line_status"]) == "3"}
+    missing = sorted(asked - {int(r["style"]) for r in rows})
+    if missing:
+        f.info_needed.append(f"Styles {', '.join(map(str, missing))} are not on POs {', '.join(map(str, ents.pos))} in this database.")
+    f.root_cause = ("Each style on a Henry PO has its own line status (order_detail.id_order_detail_status, 3 = Canceled). "
+                    "Henry has no screen to undo a cancelled line — the PO shows it as a label and bulk status updates "
+                    "skip it — so a revert is a data fix. Cancelling from the PO screen also took the style's quantity "
+                    "out of order.total_quantity.")
+    if cancelled:
+        for po in sorted(set(cancelled.values())):
+            styles = [s for s, p in cancelled.items() if p == po]
+            f.fix_sql += render("henry_po_lines_set_status", po=po, products=styles, status=14) + "\n\n"
+        f.steps = ["Check on the live PO that the styles were really produced (shipped quantity, invoices) — 14 Production Complete is what was asked; change the status in the script if not.",
+                   "Run the script on henry with a write login (Unni). It only changes lines still Canceled and recounts the PO quantity.",
+                   "Reopen the PO in Henry: the styles show Production Complete and the PO total includes them.",
+                   "Check the release collection and NetSuite PO still carry the styles (cancelled lines are skipped by release collections).",
+                   "Reply \"Completed\" with a screenshot of the PO."]
+        f.confidence = "medium"
+    elif rows:
+        f.info_needed.append("None of the named styles is Canceled on this PO — ask the requester what status they see.")
+    return f
+
+
+# -- Henry PO size quantity: screen vs PO PDF ------------------------------------
+def _po_size_qty(ents: Entities, run, render) -> Finding:
+    f = Finding()
+    rows = run("henry_po_size_channels", po_ids=ents.pos)
+    f.queries_run.append("henry_po_size_channels")
+    bad = [r for r in rows if int(r["screen_qty"] or 0) != int(r["pdf_qty"] or 0)]
+    for r in bad:
+        f.evidence.append(f"PO {r['po']} style {r['style']} {r['size']}: screen {r['screen_qty']}, PDF {r['pdf_qty']} "
+                          f"(MC split TH {r['mc_th']}, ID {r['mc_id']}, MY {r['mc_my']}, samples "
+                          f"{r['mc_sample_th']}/{r['mc_sample_id']}/{r['mc_sample_sg']}/{r['mc_sample_my']})")
+    f.root_cause = ("The PO screen shows order_detail.qty_requested, but the PO PDF the supplier receives prints the sum of "
+                    "the size's channel columns (qty_requested_th/_id/_my, qty_sample_*, order_detail_retail) and never "
+                    "reads qty_requested (OrderController@exportOrderDetails). Sizes whose channel split is empty print 0. "
+                    "PO edit paths can write qty_requested without the split (OrderService updates, approve-new-quantity).")
+    if bad:
+        f.steps = ["For each size listed, take the channel split from the MC (mc_* columns above); if the MC has none, ask the requester which channel the units are for.",
+                   "Unni fills the size's order_detail channel columns (and order_detail_retail for retail) so they add up to the screen quantity.",
+                   "Download the PO PDF again and check every size matches the screen, then send it to the supplier.",
+                   "Raise a PRDT bug for Unni: the PO edit paths must keep qty_requested and the channel split in step."]
+        f.confidence = "medium"
+    elif rows:
+        f.root_cause = "Every size's screen quantity matches the PDF channel split in this database."
+        f.info_needed.append("Ask the requester which sizes are wrong and where they see it (screen, PDF, CSV).")
+    return f
+
+
 # -- Henry PO currency ---------------------------------------------------------
 def _po_currency(ents: Entities, run, render) -> Finding:
     f = Finding()
@@ -281,6 +348,10 @@ PLAYBOOKS: list[Playbook] = [
              [["return", "rma"], ["delete", "duplicate", "multiple", "twice", "incorrectly"]],
              "returns", ["pml_order_return", "createReturn", "AdminReturnController"],
              "PESD1-11281, 11305, 11363, 11391", _duplicate_returns, code_repos=("apollo",)),
+    Playbook("po_line_revert", "Revert cancelled styles on a Henry PO",
+             [["style", "styles", "item", "items"], ["revert", "cancelled", "canceled", "back to"]],
+             "pos", ["ID_ORDER_DETAIL_STATUS_CANCELLED", "cancelOrderDetails"],
+             "PESD1-11397", _po_lines, code_repos=("henry",)),
     Playbook("po_status_revert", "Revert a Henry PO status",
              [["po", "purchase order"], ["revert", "cancelled", "canceled", "back to"]],
              "pos", ["ID_STATUS_CANCELLED", "getAvailableNextStates", "checkAndUpdateReleaseCollection"],
@@ -297,6 +368,10 @@ PLAYBOOKS: list[Playbook] = [
              [["not showing", "not visible", "can't see", "cannot see", "activate", "activation", "hidden", "not live"]],
              "products", ["release_date", "pml_product_activate_permission", "including_global"],
              "Apollo activation rules (6 Nov)", _visibility, code_repos=("apollo", "henry")),
+    Playbook("po_size_qty", "Henry PO size quantity wrong or 0",
+             [["qty", "quantity"], ["po", "purchase order", "mc"], ["xxs", "xs", "s", "m", "l", "xl", "xxl", "size", "missing", "0"]],
+             "pos", ["exportOrderDetails", "setNormalMainEntityOrderData", "qty_requested_th"],
+             "PESD1-11395", _po_size_qty, code_repos=("henry",)),
     Playbook("stock", "Stock / quantity looks wrong",
              [["stock", "quantity", "qty", "inventory"]],
              "products", ["pml_stock_available", "StockAvailable"],
@@ -312,8 +387,18 @@ PLAYBOOKS: list[Playbook] = [
 ]
 
 
+FEATURE_REQUEST = re.compile(r"\bfeature request\b", re.I)
+
+
+def is_feature_request(text: str) -> bool:
+    """New work, not a fault — there is no root cause to find (PESD1-11393 matched 'money' on its loyalty-points tier)."""
+    return bool(FEATURE_REQUEST.search(text or ""))
+
+
 def choose(text: str, ents: Entities) -> list[Playbook]:
     """Playbooks that match the text and have the ids they need, best first; money first if it matches."""
+    if is_feature_request(text):
+        return []
     scored = []
     for p in PLAYBOOKS:
         s = p.matches(text)

@@ -17,6 +17,8 @@ _PO = re.compile(r"\b(?:PO|purchase order)\s*(?:no\.?|number|#)?\s*[:#]?\s*(\d{4
 _HENRY_ORDER_URL = re.compile(r"henry\.pomelofashion\.com/order/(\d{4,6})")
 _HENRY_PRODUCT_URL = re.compile(r"henry\.pomelofashion\.com/product/(?:measurement/)?(\d{5,7})")
 _PRODUCT = re.compile(r"\b(?:product|style|item|sku id|henry id|apollo id)\s*(?:id|no\.?)?\s*[#:]?\s*(\d{5,7})\b", re.I)
+# "Revert four style 509690,509691,509744,509751 …" (PESD1-11397): every id in the list, not just the first
+_PRODUCT_LIST = re.compile(r"\b(?:products?|styles?|items?)\b[^\d\n]{0,20}(\d{6}(?:\s*(?:,|/|&|and)\s*\d{6})+)", re.I)
 _SKU_REF = re.compile(r"\b(\d{6}-\d{5,6})\b")            # product-variant reference, e.g. 151164-381846
 _PO_INVOICE = re.compile(r"\b(\d{5})-(\d{5})\b")           # Henry PO-invoice pair, e.g. 33920-55620 (PESD1-11358)
 _TRANSFER = re.compile(r"\b(TO-\d{6,10})\b", re.I)
@@ -77,7 +79,8 @@ def extract(text: str) -> Entities:
         pos=_uniq(int(m) for m in _PO.findall(text) + _HENRY_ORDER_URL.findall(text)
                   + [po for po, _ in _PO_INVOICE.findall(text)]),
         invoices=_uniq(int(inv) for _, inv in _PO_INVOICE.findall(text)),
-        products=_uniq(int(m) for m in _HENRY_PRODUCT_URL.findall(text) + _PRODUCT.findall(text)),
+        products=_uniq(int(m) for m in _HENRY_PRODUCT_URL.findall(text) + _PRODUCT.findall(text)
+                       + [i for grp in _PRODUCT_LIST.findall(text) for i in re.findall(r"\d{6}", grp)]),
         sku_refs=_uniq(_SKU_REF.findall(text)),
         transfers=_uniq(m.upper() for m in _TRANSFER.findall(text)),
         collections=_uniq(int(m) for m in _MC.findall(text)),

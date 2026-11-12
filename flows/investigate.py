@@ -147,9 +147,13 @@ def write_investigations(ctx):
     """One packet per ticket under review/investigations/."""
     from agents.investigator import report
     folder = ctx.get("output") or FOLDER
+    from agents.investigator.playbooks import is_feature_request
     written = []
     for it in ctx["items"]:
         issue, f, pb = it["issue"], it["finding"], it.get("playbook")
+        if is_feature_request(it["text"]) and not f.info_needed:
+            f.info_needed = ["Feature request — new work, not a fault, so there is no root cause to find. "
+                             "Route it to the platform's developer as a PRDT story."]
         inv = {
             "ticket": issue["key"],
             "summary": (issue.get("fields") or {}).get("summary") or "",
