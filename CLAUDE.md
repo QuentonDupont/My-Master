@@ -49,6 +49,23 @@ Do not query, write to, or reason about any other Jira project.
 2. **No writes to Apollo or Henry. Ever.** Read-only integrations only, and only
    after they are explicitly added in a later phase.
 
+   **Read-only database integration, added 12 Nov 2026 by the board owner: the
+   investigator** (`flows/investigate.py`, `agents/investigator/`). His words: "add an
+   investigative layer of intelligence where you search production database, apollo
+   platform, henry platform and all pomelo repos on how to locate the root cause of
+   issues, and provide a step by step fix". It is exactly this wide:
+   - reads spanky and henry through the read-only `lambda-read` login; every statement
+     must be a single SELECT/WITH/SHOW/DESCRIBE/EXPLAIN (`db.check_read_only`) and the
+     session is opened READ ONLY — three guards, any one enough
+   - only catalogued queries run (`<QUERIES_REPO>/catalog/*.sql`, `kind: read`), with
+     ids rendered by type — never free SQL built from ticket text
+   - a fix that changes data is a `kind: write` template rendered into the packet for a
+     person to run; the system never executes it
+   - writes nothing but its packet under `review/investigations/`; no Jira write
+   - money tickets (never-touch, invariant 3) get evidence only, never a fix
+   - every packet names the database it read; pre-production is a stale copy and is
+     never reported as the live state
+
    **One exception, added 21 Sep 2026 by the board owner: the Marketing &
    Onsite team** (`agents/marketing_onsite/`) sets up content in Apollo for web
    and app. Henry remains untouched, permanently and with no exception. The
@@ -145,6 +162,7 @@ mirror, daily-report); manual runs are dry-run unless `--execute`.
 | rules | Mon 08:30 | cluster_corrections → write_rule_proposals |
 | housekeeping | hourly | rotate_logs → prune_run_history |
 | retriage | human (a rule changed) | load_for_retriage → claim_for_retriage → run_triage → record_retriage_correction |
+| investigate | human | load_investigation_tickets → extract_ids → match_playbooks → check_database (read-only) → search_code → write_investigations |
 
 `python -m flows list | show <flow> | run <flow> [--execute] [--confirm] | tick |
 status | runs`. The old module CLIs (`queue run`, `labels poll`, `batch execute`,
@@ -170,6 +188,7 @@ is a sub-flow. Never widen an agent to do a second thing — add a second agent.
   /chief_of_staff  brief, health, rules, daily report
   /marketing_onsite content tasks, surfaces, SOPs, change-plan drafting
   /digital_twin    personal Chief of Staff — read and draft only, reports to owner
+  /investigator    root cause + fix packets: ids, playbooks, read-only DB, code search
 /core
   flow.py        agents, flows, triggers — the runtime and its guardrails
   scheduler.py   the tick: what is due, locks, run history, alerts

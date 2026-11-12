@@ -17,6 +17,17 @@ touch carries the **fix**: what to do, where, who does it, and how to check
 it worked. Work out the fix from what the organisation already knows before
 drafting anything. Run this after the gates below pass.
 
+0. **Run the `investigate` flow first** (board owner, 12 Nov 2026: "i want this
+   to run under the pesd1 triage command"). Run
+   `python -m flows run investigate --data '{"tickets": ["PESD1-…"]}'`.
+   It writes `review/investigations/<KEY>.md`:
+   - the ids, the matched playbook and the root cause;
+   - evidence from read-only spanky/henry queries;
+   - the code involved;
+   - fix steps and fix SQL for a person to run.
+   Start from that packet. Then fill what it lists under "Information still
+   needed" with the steps below. When you write a query that answered the
+   question, add it to the Queries repo `catalog/` so the next run has it.
 1. **Match the ticket type in `playbooks.md`** (next to this file). A matching
    recipe is the starting point. Still check its precedents are current.
 2. **Historian: Jira precedent.** Find 3–5 resolved PESD1 tickets of the same
