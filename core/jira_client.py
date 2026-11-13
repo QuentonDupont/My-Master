@@ -456,6 +456,19 @@ class JiraWriteClient(_Base):
     def unassign(self, key: str) -> dict:  # undo of assign
         return self.assign(key, None)
 
+    # -- labels ------------------------------------------------------------
+    def add_labels(self, key: str, labels: list[str]) -> dict:
+        assert_key_allowed(key)
+        return self._do("add_labels", {"key": key, "labels": labels},
+                        lambda: self._request("PUT", f"/rest/api/2/issue/{key}",
+                                              body={"update": {"labels": [{"add": l} for l in labels]}}))
+
+    def remove_labels(self, key: str, labels: list[str]) -> dict:  # undo of add_labels
+        assert_key_allowed(key)
+        return self._do("remove_labels", {"key": key, "labels": labels},
+                        lambda: self._request("PUT", f"/rest/api/2/issue/{key}",
+                                              body={"update": {"labels": [{"remove": l} for l in labels]}}))
+
     # -- transitions -------------------------------------------------------
     def transition(self, key: str, status_name: str,
                    fields: dict | None = None) -> dict:

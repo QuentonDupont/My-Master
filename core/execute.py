@@ -126,6 +126,12 @@ def clone_fields(clone) -> dict:
     return fields
 
 
+def _with_always_labels(labels: list[str] | None) -> list[str]:
+    """The clone's own labels first (the first one picks the epic), then the board's standing labels."""
+    own = list(labels or [])
+    return own + [l for l in (config.boards().get("always_labels") or []) if l not in own]
+
+
 def _drop_link(writer: JiraWriteClient, clone_key: str, ticket: str) -> None:
     link_id = writer.find_link_id(clone_key, ticket)
     if link_id:
@@ -190,6 +196,7 @@ def execute_proposal(proposal_id: str, *, execute: bool = False,
             LOG.info("execute.resuming", ticket=ticket, comment_id=done_comment,
                      clone_key=done_clone)
         prior_status: str | None = None
+        prior_labels: list[str] | None = None
         if execute:
             try:
                 prior_status = writer.current_status(ticket)
@@ -197,6 +204,10 @@ def execute_proposal(proposal_id: str, *, execute: bool = False,
                             {"status": prior_status})
             except Exception as exc:  # pragma: no cover - network path
                 LOG.warn("execute.prior_status_unavailable", ticket=ticket, error=str(exc))
+            try:
+                prior_labels = reader.issue(ticket, fields="labels")["fields"].get("labels") or []
+            except Exception as exc:  # pragma: no cover - network path
+                LOG.warn("execute.prior_labels_unavailable", ticket=ticket, error=str(exc))
 
         def run(name: str, action: Callable[[], Any], detail: dict,
                 compensate: Callable[[], Any] | None = None) -> Any:
@@ -258,7 +269,7 @@ def execute_proposal(proposal_id: str, *, execute: bool = False,
                         lambda: writer.create_issue(
                             clone.target_project, clone.summary, clone.description,
                             issue_type=config.dev_issue_type(),
-                            labels=clone.labels, priority=clone.priority,
+                            labels=_with_always_labels(clone.labels), priority=clone.priority,
                             extra_fields=screen_fields(
                                 clone_fields(clone), config.dev_issue_type(),
                                 reader) if execute else clone_fields(clone)),
@@ -298,7 +309,21 @@ def execute_proposal(proposal_id: str, *, execute: bool = False,
                         {"key": clone_key, "assignee": clone.assignee},
                         compensate=lambda: writer.unassign(clone_key))
 
-            # 5. transition PESD1
+            # 5. the board's standing labels on the PESD1 ticket (only the ones it lacks,
+            #    so undo removes exactly what this step added)
+            standing = config.boards().get("always_labels") or []
+            if standing:
+                had = set(prior_labels or []) if execute else set()
+                missing = [l for l in standing if l not in had]
+                if missing:
+                    run("labels",
+                        lambda: writer.add_labels(ticket, missing),
+                        {"ticket": ticket, "added": missing},
+                        compensate=lambda: writer.remove_labels(ticket, missing))
+                else:
+                    result.steps.append(StepResult("labels", True, {"skipped": "already labelled"}))
+
+            # 6. transition PESD1
             if proposal.pesd1_transition:
                 if execute and prior_status == proposal.pesd1_transition:
                     result.steps.append(StepResult("transition", True,
@@ -406,6 +431,13 @@ def undo(ticket_key: str, *, execute: bool = False,
             break
         if prior:
             step("transition", lambda: writer.transition(ticket_key, prior), {"to": prior})
+        label_entries = [entry for entry in led.journal_for(ticket_key)
+                         if entry["step"] == "labels" and entry["ok"]
+                         and entry["proposal_id"] == row["proposal_id"]]
+        for entry in label_entries:
+            added = (json.loads(entry["detail"] or "{}") or {}).get("added") or []
+            if added:
+                step("labels", lambda added=added: writer.remove_labels(ticket_key, added), {"removed": added})
         if row["clone_key"]:
             step("unassign", lambda: writer.unassign(row["clone_key"]),
                  {"key": row["clone_key"]})

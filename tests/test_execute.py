@@ -44,8 +44,16 @@ class FakeWriter:
     def create_issue(self, project, summary, description, issue_type,
                      labels=None, priority=None, extra_fields=None):
         self._record("clone", project=project, issue_type=issue_type,
-                     extra_fields=extra_fields or {})
+                     extra_fields=extra_fields or {}, labels=list(labels or []))
         return {"key": "PRDT-999"}
+
+    def add_labels(self, key, labels):
+        self._record("add_labels", key=key, labels=list(labels))
+        return {}
+
+    def remove_labels(self, key, labels):
+        self._record("remove_labels", key=key, labels=list(labels))
+        return {}
 
     def link_issues(self, inward, outward, link_type):
         self._record("link", inward=inward, outward=outward)
@@ -81,6 +89,12 @@ class FakeWriter:
 
 
 class FakeReader:
+    def __init__(self, labels=None):
+        self.labels = labels or []
+
+    def issue(self, key, fields="*all"):
+        return {"key": key, "fields": {"labels": list(self.labels)}}
+
     def find_users(self, query):
         return [{"accountId": "acc-1", "displayName": query,
                  "emailAddress": "dev@pomelofashion.com"}]
@@ -253,6 +267,48 @@ class ExecuteTests(unittest.TestCase):
                 self.assertEqual(row["state"], L.ROLLED_BACK)
                 self.assertIsNone(row["clone_key"])
                 self.assertIsNone(row["comment_id"])
+
+    def _with_standing_labels(self):
+        from core import config
+        return _patched_boards({**config.boards(), "always_labels": ["business_continuity", "tech_ops"]})
+
+    def test_standing_labels_go_on_the_clone_after_its_own_and_on_the_ticket(self):
+        with sandbox():
+            with self._with_standing_labels(), L.Ledger() as led:
+                proposal = approved_proposal(led)
+                writer = FakeWriter()
+                result = E.execute_proposal(proposal.proposal_id, execute=True, ledger=led,
+                                            writer=writer, reader=FakeReader(labels=["tech_ops"]))
+                self.assertTrue(result.ok)
+                calls = dict(writer.calls)
+                own = list(proposal.clone.labels)
+                self.assertEqual(calls["clone"]["labels"][:len(own)], own)   # first label still picks the epic
+                self.assertEqual(calls["clone"]["labels"][len(own):],
+                                 [l for l in ["business_continuity", "tech_ops"] if l not in own])
+                self.assertEqual(calls["add_labels"], {"key": proposal.ticket, "labels": ["business_continuity"]})
+                self.assertEqual([c[0] for c in writer.calls],
+                                 ["comment", "clone", "link", "assign", "add_labels", "transition"])
+
+    def test_undo_removes_only_the_labels_execute_added(self):
+        with sandbox():
+            with self._with_standing_labels(), L.Ledger() as led:
+                proposal = approved_proposal(led)
+                E.execute_proposal(proposal.proposal_id, execute=True, ledger=led,
+                                   writer=FakeWriter(), reader=FakeReader(labels=["tech_ops"]))
+                undo_writer = FakeWriter()
+                result = E.undo(proposal.ticket, execute=True, ledger=led, writer=undo_writer)
+                self.assertTrue(result.ok)
+                self.assertIn(("remove_labels", {"key": proposal.ticket, "labels": ["business_continuity"]}),
+                              undo_writer.calls)
+
+    def test_no_label_write_when_the_ticket_already_has_them(self):
+        with sandbox():
+            with self._with_standing_labels(), L.Ledger() as led:
+                proposal = approved_proposal(led)
+                writer = FakeWriter()
+                E.execute_proposal(proposal.proposal_id, execute=True, ledger=led, writer=writer,
+                                   reader=FakeReader(labels=["business_continuity", "tech_ops"]))
+                self.assertNotIn("add_labels", [c[0] for c in writer.calls])
 
     def test_retry_after_a_failure_does_not_repeat_completed_steps(self):
         """The live run posted a comment, then the clone failed. A retry must
