@@ -208,6 +208,14 @@ class PlaybookTests(unittest.TestCase):
         xl = "please help check the PO FEB27_URBAN the QTY all XL show 0. MC 18235"
         self.assertEqual(playbooks.choose(xl, entities.extract(xl))[0].key, "po_size_qty")
 
+    def test_netsuite_record_requests_get_no_playbook(self):
+        for text in ("[NetSuite] Request to Delete Purchase Order PO-TH-24100215 (Incorrect SKU) — status PENDING RECEIPT",
+                     "Hello, could you please remove the IR number? Because the WH received the order but it didn't match the invoice. 3239328"):
+            self.assertTrue(playbooks.is_netsuite_admin(text), text)
+            self.assertEqual(playbooks.choose(text, entities.extract(text)), [])
+        po = "please help check the PO FEB27_URBAN the QTY all XL show 0. MC 18235"
+        self.assertFalse(playbooks.is_netsuite_admin(po))
+
     def test_feature_requests_get_no_playbook(self):
         text = "[Feature Request] PomQ POS: Support Multi-tier Promotion Stacking — Tier 3: Voucher / Loyalty Points / credit"
         self.assertEqual(playbooks.choose(text, entities.extract(text)), [])

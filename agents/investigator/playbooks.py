@@ -395,9 +395,19 @@ def is_feature_request(text: str) -> bool:
     return bool(FEATURE_REQUEST.search(text or ""))
 
 
+# NetSuite record admin: delete a PO, remove an item receipt (IR), reset a password (PESD1-11396/98/99, 11378).
+NETSUITE_ADMIN = re.compile(r"\[netsuite\]|\bPO-[A-Z]{2}-\d{6,}|\bIR\s*(?:number|no\.?|#)|\bitem receipt\b"
+                            r"|\bnetsuite\b.{0,60}\b(?:password|delete|remove)\b", re.I | re.S)
+
+
+def is_netsuite_admin(text: str) -> bool:
+    """A change to a NetSuite record, made by hand in NetSuite — no spanky/henry root cause to find."""
+    return bool(NETSUITE_ADMIN.search(text or ""))
+
+
 def choose(text: str, ents: Entities) -> list[Playbook]:
     """Playbooks that match the text and have the ids they need, best first; money first if it matches."""
-    if is_feature_request(text):
+    if is_feature_request(text) or is_netsuite_admin(text):
         return []
     scored = []
     for p in PLAYBOOKS:

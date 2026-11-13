@@ -147,13 +147,16 @@ def write_investigations(ctx):
     """One packet per ticket under review/investigations/."""
     from agents.investigator import report
     folder = ctx.get("output") or FOLDER
-    from agents.investigator.playbooks import is_feature_request
+    from agents.investigator.playbooks import is_feature_request, is_netsuite_admin
     written = []
     for it in ctx["items"]:
         issue, f, pb = it["issue"], it["finding"], it.get("playbook")
         if is_feature_request(it["text"]) and not f.info_needed:
             f.info_needed = ["Feature request — new work, not a fault, so there is no root cause to find. "
                              "Route it to the platform's developer as a PRDT story."]
+        elif is_netsuite_admin(it["text"]) and not f.info_needed:
+            f.info_needed = ["NetSuite record change (delete a PO, remove an item receipt, reset a password) — made by hand "
+                             "in NetSuite, no database root cause. Route it to Vishal; check for a duplicate request first."]
         inv = {
             "ticket": issue["key"],
             "summary": (issue.get("fields") or {}).get("summary") or "",
