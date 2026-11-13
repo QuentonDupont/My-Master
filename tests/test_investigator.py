@@ -208,6 +208,25 @@ class PlaybookTests(unittest.TestCase):
         xl = "please help check the PO FEB27_URBAN the QTY all XL show 0. MC 18235"
         self.assertEqual(playbooks.choose(xl, entities.extract(xl))[0].key, "po_size_qty")
 
+    def test_reverted_return_status_gets_the_return_playbook_not_henry(self):
+        text = ('The returned item was previously accepted, but the system reverted the status back to before acceptance. '
+                'Please change it back to "Accepted". Please change the status to "Return Received". RMA1422531 RMA1422532')
+        ents = entities.extract(text)
+        self.assertEqual(ents.returns, [1422531, 1422532])
+        self.assertEqual(playbooks.choose(text, ents)[0].key, "return_status")
+
+    def test_return_status_fix_only_for_returns_set_back_to_20(self):
+        t = dict(self.t)
+        t["return_set_state"] = catalog.parse(
+            "-- id: return_set_state\n-- db: spanky\n-- kind: write\n-- params: rma_ids:ints, from_state:int, to_state:int\n"
+            "UPDATE pml_order_return SET state = {{to_state}} WHERE id_order_return IN ({{rma_ids}}) AND state = {{from_state}};\n",
+            "return_set_state.sql")
+        rows = [{"id_order_return": "1422531", "id_order": "1", "shop": "TH", "state": "20", "state_name": "Return Arrived at TH WH"},
+                {"id_order_return": "1422532", "id_order": "1", "shop": "TH", "state": "3", "state_name": "Return Received"}]
+        run, render = make_run(t, {"id_order_return IN": rows})
+        f = playbooks._return_status(entities.Entities(returns=[1422531, 1422532]), run, render)
+        self.assertIn("SET state = 3 WHERE id_order_return IN (1422531) AND state = 20", f.fix_sql)
+
     def test_netsuite_record_requests_get_no_playbook(self):
         for text in ("[NetSuite] Request to Delete Purchase Order PO-TH-24100215 (Incorrect SKU) — status PENDING RECEIPT",
                      "Hello, could you please remove the IR number? Because the WH received the order but it didn't match the invoice. 3239328"):

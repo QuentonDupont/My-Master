@@ -146,6 +146,38 @@ def _po_status(ents: Entities, run, render) -> Finding:
     return f
 
 
+# -- Apollo return status reverted ---------------------------------------------
+RETURN_RECEIVED, RETURN_ARRIVED_TH_WH = 3, 20
+
+
+def _return_status(ents: Entities, run, render) -> Finding:
+    f = Finding()
+    rows = run("return_by_id", rma_ids=ents.returns)
+    f.queries_run.append("return_by_id")
+    for r in rows:
+        f.evidence.append(f"RMA{r['id_order_return']} (order {r['id_order']}, {r.get('shop')}): state {r['state']} "
+                          f"({r.get('state_name')}), NetSuite {r.get('ns_rma_number') or '-'} {r.get('ns_sync_status') or ''}".strip())
+    gone = [x for x in ents.returns if x not in {int(r["id_order_return"]) for r in rows}]
+    if gone:
+        f.info_needed.append("Not in this database: " + ", ".join(f"RMA{x}" for x in gone)
+                             + " (newer than a pre-production copy?)")
+    f.root_cause = ("The returns were accepted (Return Received, state 3) and a later automated update set them back to "
+                    "Return Arrived at TH WH (state 20) — the SPANKY-after-NIMBUS regression tracked in PRDT-11755. "
+                    "Until that is fixed, the status is corrected by data fix.")
+    reverted = [int(r["id_order_return"]) for r in rows if str(r["state"]) == str(RETURN_ARRIVED_TH_WH)]
+    target = reverted or ([] if rows else list(ents.returns))
+    if target:
+        f.fix_sql = render("return_set_state", rma_ids=target, from_state=RETURN_ARRIVED_TH_WH, to_state=RETURN_RECEIVED)
+        f.steps = ["Check the returns' credit slips (refund) first: setting the state by SQL runs no Apollo hooks.",
+                   "Run the script on spanky (writer, write login): it only changes returns still in state 20 and adds a history row for each.",
+                   "Re-check the status after the next sync: until the regression is fixed it can be reverted again — note it on the dev ticket.",
+                   "Reply \"Completed\" with a screenshot of the return status."]
+        f.confidence = "medium" if reverted else "low"
+    elif rows:
+        f.info_needed.append("None of the returns is in Return Arrived at TH WH now — ask what status they see.")
+    return f
+
+
 # -- Henry PO styles (lines) cancelled -----------------------------------------
 LINE_STATUS = {"1": "New", "3": "Canceled", "4": "Approved", "5": "Invoice Generated", "7": "Complete",
                "12": "Order Placed", "13": "In Production", "14": "Production Complete"}
@@ -348,8 +380,13 @@ PLAYBOOKS: list[Playbook] = [
              [["return", "rma"], ["delete", "duplicate", "multiple", "twice", "incorrectly"]],
              "returns", ["pml_order_return", "createReturn", "AdminReturnController"],
              "PESD1-11281, 11305, 11363, 11391", _duplicate_returns, code_repos=("apollo",)),
+    Playbook("return_status", "Apollo return status reverted after it was received",
+             [["return", "returned", "rma"], ["status", "state"], ["received", "accepted", "revert", "reverted", "back"]],
+             "returns", ["pml_order_return_history", "Return Arrived", "ns_return_status"],
+             "PESD1-11307, 11313 (PRDT-11755)", _return_status, code_repos=("apollo",)),
+    # "style" only — "item … reverted the status" is an Apollo return (PESD1-11307), not a Henry PO line
     Playbook("po_line_revert", "Revert cancelled styles on a Henry PO",
-             [["style", "styles", "item", "items"], ["revert", "cancelled", "canceled", "back to"]],
+             [["style", "styles"], ["revert", "cancelled", "canceled", "back to"]],
              "pos", ["ID_ORDER_DETAIL_STATUS_CANCELLED", "cancelOrderDetails"],
              "PESD1-11397", _po_lines, code_repos=("henry",)),
     Playbook("po_status_revert", "Revert a Henry PO status",
