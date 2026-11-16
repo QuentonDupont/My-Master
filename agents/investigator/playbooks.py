@@ -432,9 +432,11 @@ def is_feature_request(text: str) -> bool:
     return bool(FEATURE_REQUEST.search(text or ""))
 
 
-# NetSuite record admin: delete a PO, remove an item receipt (IR), reset a password (PESD1-11396/98/99, 11378).
+# NetSuite record admin: delete a PO, remove an item receipt (IR), reset a password (PESD1-11396/98/99, 11378),
+# create NCG / non-merchandise items (PESD1-11402/03/04).
 NETSUITE_ADMIN = re.compile(r"\[netsuite\]|\bPO-[A-Z]{2}-\d{6,}|\bIR\s*(?:number|no\.?|#)|\bitem receipt\b"
-                            r"|\bnetsuite\b.{0,60}\b(?:password|delete|remove)\b", re.I | re.S)
+                            r"|\bnetsuite\b.{0,60}\b(?:password|delete|remove)\b"
+                            r"|\bS_NCG\d+|\bcreate\b.{0,40}\bNCG\b", re.I | re.S)
 
 
 def is_netsuite_admin(text: str) -> bool:

@@ -229,6 +229,7 @@ class PlaybookTests(unittest.TestCase):
 
     def test_netsuite_record_requests_get_no_playbook(self):
         for text in ("[NetSuite] Request to Delete Purchase Order PO-TH-24100215 (Incorrect SKU) — status PENDING RECEIPT",
+                     "Request to create new NCG items: Perfume Testers 50 ml. S_NCG0149 — Category: NCG - Bottle",
                      "Hello, could you please remove the IR number? Because the WH received the order but it didn't match the invoice. 3239328"):
             self.assertTrue(playbooks.is_netsuite_admin(text), text)
             self.assertEqual(playbooks.choose(text, entities.extract(text)), [])
