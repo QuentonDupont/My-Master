@@ -74,6 +74,12 @@ development:
   # PESD1 Support Escalations — created for triage-raised work.
   default_epic: PRDT-11563
 
+# Labels every executed proposal adds to BOTH the PESD1 ticket and its PRDT clone
+# (13 Nov 2026, Quenton: "always add business_continuty and tech_ops labels to each
+# PESD1 ticket and PRDT ticket"). On a clone they go after its own labels, because the
+# first label picks the epic and business_continuity would pick the Crashlytics epic.
+always_labels: [business_continuity, tech_ops]
+
 # Ticket families the board owner has already decided how to handle. A match
 # skips duplicate search, the analyst and developer routing: the clone copies
 # the PESD1 summary and description verbatim, with the labels and assignee
