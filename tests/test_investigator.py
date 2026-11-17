@@ -28,6 +28,8 @@ TEMPLATES = {
                                  "AND id_product IN ({{products}}) AND id_order_detail_status = 3;\n",
     "henry_po_size_channels": "-- id: henry_po_size_channels\n-- db: henry\n-- kind: read\n-- params: po_ids:ints\n"
                               "SELECT * FROM order_detail d WHERE d.id_order IN ({{po_ids}})\n",
+    "henry_mc_clone_cost_vs_main": "-- id: henry_mc_clone_cost_vs_main\n-- db: henry\n-- kind: read\n-- params: main_mc_ids:ints\n"
+                                   "SELECT * FROM merchandise_collection c WHERE c.parent_id IN ({{main_mc_ids}})\n",
 }
 
 # PESD1-11397, as seen on live Henry PO 34080 on 12 Nov 2026 (509692 was cancelled too, but never shipped).
@@ -235,6 +237,28 @@ class PlaybookTests(unittest.TestCase):
             self.assertEqual(playbooks.choose(text, entities.extract(text)), [])
         po = "please help check the PO FEB27_URBAN the QTY all XL show 0. MC 18235"
         self.assertFalse(playbooks.is_netsuite_admin(po))
+
+    def test_clone_mc_cost_ticket_matches_its_playbook(self):
+        # PESD1-11293: franchise MCs kept the cost they were cloned with.
+        text = "Check cost for JAN Collections. Cost on the franchise MC 18240 is not the same as the main MC"
+        self.assertEqual(playbooks.choose(text, entities.extract(text))[0].key, "mc_clone_cost")
+
+    def test_clone_mc_cost_splits_unordered_from_ordered_clones(self):
+        rows = [{"main_mc": "18240", "clone_mc": "18301", "clone_ordered": "0", "style": "509309",
+                 "main_cost": "86", "main_currency": "RMB", "clone_cost": "76", "clone_currency": "RMB"},
+                {"main_mc": "18240", "clone_mc": "18302", "clone_ordered": "1", "style": "509309",
+                 "main_cost": "86", "main_currency": "RMB", "clone_cost": "76", "clone_currency": "RMB"}]
+        run, render = make_run(self.t, {"parent_id IN (18240)": rows})
+        f = playbooks._mc_clone_cost(entities.Entities(collections=[18240]), run, render)
+        self.assertEqual(f.fix_sql, "")
+        self.assertTrue(any("not yet ordered (18301)" in s and "Sync Supplier Price" in s for s in f.steps))
+        self.assertTrue(any("already ordered (18302)" in s and "henry_po_cost_vs_main" in s for s in f.steps))
+
+    def test_clone_mc_cost_with_no_difference_asks_the_requester(self):
+        run, render = make_run(self.t, {})
+        f = playbooks._mc_clone_cost(entities.Entities(collections=[18240]), run, render)
+        self.assertEqual(f.steps, [])
+        self.assertTrue(f.info_needed)
 
     def test_feature_requests_get_no_playbook(self):
         text = "[Feature Request] PomQ POS: Support Multi-tier Promotion Stacking — Tier 3: Voucher / Loyalty Points / credit"

@@ -289,6 +289,35 @@ def _po_currency(ents: Entities, run, render) -> Finding:
     return f
 
 
+# -- clone (franchise) MC cost differs from its main MC ------------------------------
+def _mc_clone_cost(ents: Entities, run, render) -> Finding:
+    f = Finding()
+    rows = run("henry_mc_clone_cost_vs_main", main_mc_ids=ents.collections)
+    f.queries_run.append("henry_mc_clone_cost_vs_main")
+    f.root_cause = ("A clone (franchise) MC copies each style's supplier cost from its main MC only when it is cloned. "
+                    "The main → clone carry-over (applyProductCostToClonedPO) lost its only call in PRDT-10711 "
+                    "(Henry #2307, 14 Jan 2026), so a cost changed on the main MC afterwards stays old on the clones.")
+    if not rows:
+        f.info_needed.append(f"No clone of MC {', '.join(map(str, ents.collections))} differs from its main MC — "
+                             "ask the requester for the clone MC / PO and style that shows the wrong cost.")
+        return f
+    unordered = sorted({int(r["clone_mc"]) for r in rows if str(r["clone_ordered"]) == "0"})
+    ordered = sorted({int(r["clone_mc"]) for r in rows if str(r["clone_ordered"]) != "0"})
+    for r in rows:
+        f.evidence.append(f"MC {r['main_mc']} → clone {r['clone_mc']} ({'ordered' if str(r['clone_ordered']) != '0' else 'not ordered'}): "
+                          f"style {r['style']} main {r['main_cost']} {r['main_currency']}, clone {r['clone_cost']} {r['clone_currency']}")
+    f.steps.append("Confirm with Franchise/Buying that the main MC cost is the right one.")
+    if unordered:
+        f.steps.append(f"Clone MCs not yet ordered ({', '.join(map(str, unordered))}): open the main MC in Henry → "
+                       "'Sync Supplier Price to Cloned POs', then re-run henry_mc_clone_cost_vs_main.")
+    if ordered:
+        f.steps.append(f"Clone MCs already ordered ({', '.join(map(str, ordered))}): the button skips them and their POs keep "
+                       "the old cost — correct the POs with henry_po_cost_vs_main → henry_po_cost_from_main (PESD1-11202). "
+                       "Stop if an invoice is already synced to NetSuite.")
+    f.confidence = "medium"
+    return f
+
+
 # -- product visibility / activation ---------------------------------------------
 def _sp_ids(ents: Entities, run, f: Finding) -> list[int]:
     rows = run("henry_products", product_ids=ents.products)
@@ -397,6 +426,10 @@ PLAYBOOKS: list[Playbook] = [
              [["currency", "rmb", "thb", "usd"], ["po", "purchase order", "mc", "order"]],
              "pos", ["id_currency", "new_currency_id", "updateOrder"],
              "PESD1-11380/81/82, 11388 (PRDT-12009)", _po_currency, code_repos=("henry",)),
+    Playbook("mc_clone_cost", "Clone (franchise) MC cost differs from its main MC",
+             [["cost", "costs", "supplier price"], ["clone", "cloned", "franchise", "collection", "collections", "mc"]],
+             "collections", ["applyProductCostToClonedPO", "syncSupplierPriceToClonedPOs", "cloneMerchandiseCollectionDetails"],
+             "PESD1-11293 (PRDT-12002)", _mc_clone_cost, code_repos=("henry",)),
     Playbook("measurement_image", "Measurement image missing or wrong",
              [["measurement", "size guide", "size chart"]],
              "products", ["id_measurement_image", "measurement_guide"],
